@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurelia Wings — 3D Archipelago STOL Flight Simulator</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f7c98a;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .panel { background: rgba(8, 16, 26, 0.66); border: 1px solid rgba(120, 200, 220, 0.35);
+    border-radius: 8px; color: #dfeef4; }
+  /* Mission card: top-left, three lines at most. */
+  #mission-card { position: fixed; top: 12px; left: 12px; padding: 9px 12px; max-width: 330px;
+    font-size: 13px; line-height: 1.45; }
+  #mission-name { font-weight: 700; color: #ffd27a; font-size: 13px; letter-spacing: 0.4px; }
+  #mission-line { color: #e8f4f8; }
+  #mission-prog { color: #9fd8e8; font-size: 12px; }
+  /* Compass: top-centre. */
+  #compass { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 420px; height: 46px; }
+  /* Minimap: top-right. */
+  #minimap { position: fixed; top: 12px; right: 12px; width: 170px; height: 170px; }
+  /* Speed / altitude tapes on the edges. */
+  #ias { position: fixed; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 70px; height: 280px; }
+  #alt { position: fixed; right: 12px; top: 50%; transform: translateY(-50%);
+    width: 70px; height: 280px; }
+  /* Bottom-centre instrument cluster. */
+  #bottombar { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+  #sixpack { width: 372px; height: 66px; }
+  .bars { display: flex; flex-direction: column; gap: 5px; width: 120px; }
+  .bar-row { display: flex; align-items: center; gap: 6px; font-size: 9px; color: #bfe3ee;
+    letter-spacing: 0.5px; }
+  .bar-row span { width: 34px; text-align: right; font-weight: 700; }
+  .bar-track { flex: 1; height: 7px; background: rgba(255,255,255,0.14); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+  .pills { display: flex; flex-direction: column; gap: 5px; }
+  .pill { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #9fb8c4;
+    border: 1px solid rgba(140, 210, 225, 0.35); border-radius: 5px; padding: 3px 7px;
+    text-align: center; white-space: nowrap; }
+  .pill.on { color: #ffd27a; border-color: #ffd27a; }
+  .keys { display: flex; flex-direction: column; gap: 5px; }
+  .keys button { font: 700 10px system-ui, sans-serif; letter-spacing: 0.4px; color: #dfeef4;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(140, 210, 225, 0.4);
+    border-radius: 5px; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+  .keys button:hover { background: rgba(140, 210, 225, 0.25); }
+  /* Toast: one short line, centre, fades on its own. */
+  #toast { position: fixed; top: 22%; left: 50%; transform: translateX(-50%);
+    font-size: 15px; font-weight: 700; color: #ffe9b0; text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+    opacity: 0; transition: opacity 0.3s; pointer-events: none; letter-spacing: 0.3px; }
+  /* Landing debrief, centre. */
+  #landing { position: fixed; top: 34%; left: 50%; transform: translateX(-50%);
+    display: none; padding: 16px 22px; min-width: 280px; text-align: center; }
+  .land-title { font-size: 19px; font-weight: 800; color: #ffd27a; letter-spacing: 1px; margin-bottom: 8px; }
+  .land-row { font-size: 14px; color: #dfeef4; line-height: 1.7; }
+  .land-row b { color: #8fe3f5; }
+  .land-hint { margin-top: 8px; font-size: 11px; color: #9fb8c4; }
+  /* Mission picker, centre. */
+  #mission-list { position: fixed; top: 26%; left: 50%; transform: translateX(-50%);
+    display: none; padding: 14px 16px; min-width: 420px; }
+  .ml-title { font-size: 13px; font-weight: 800; color: #ffd27a; letter-spacing: 1px; margin-bottom: 8px; }
+  .ml-row { display: block; width: 100%; text-align: left; font: 600 13px system-ui, sans-serif;
+    color: #dfeef4; background: rgba(255,255,255,0.06); border: 1px solid rgba(140,210,225,0.25);
+    border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+  .ml-row:hover { background: rgba(140, 210, 225, 0.2); }
+  .ml-row.ml-current { border-color: #ffd27a; color: #ffe9b0; }
+  .ml-hint { font-size: 11px; color: #9fb8c4; margin-top: 4px; }
+  /* Wordmark, bottom-left. */
+  #wordmark { position: fixed; left: 14px; bottom: 12px; font-size: 11px; font-weight: 800;
+    letter-spacing: 2px; color: rgba(255, 240, 210, 0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  #wordmark small { display: block; font-weight: 600; letter-spacing: 0.6px; font-size: 10px;
+    color: rgba(230, 245, 250, 0.75); }
+  #wordmark .hint { display: block; font-weight: 500; letter-spacing: 0.3px; font-size: 10px;
+    color: rgba(230, 245, 250, 0.6); margin-top: 2px; }
+  #score-chip { position: fixed; right: 14px; bottom: 12px; font-size: 12px; font-weight: 700;
+    color: #ffe9b0; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  #score-chip span { color: #8fe3f5; }
+  @media (max-width: 900px) {
+    #compass { width: 300px; }
+    #mission-card { max-width: 240px; }
+    #sixpack { width: 280px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="Aurelia Wings: fly the twin-prop through the golden gates and land on the island runway"></canvas>
+<canvas id="overlay"></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+
+<div id="mission-card" class="panel">
+  <div id="mission-name">Coral Mail</div>
+  <div id="mission-line">Fly the gates, then land RWY 09</div>
+  <div id="mission-prog">Score 0 · Fuel 100%</div>
+</div>
+<canvas id="compass" width="420" height="46"></canvas>
+<canvas id="minimap" width="170" height="170"></canvas>
+<canvas id="ias" width="70" height="280"></canvas>
+<canvas id="alt" width="70" height="280"></canvas>
+
+<div id="toast"></div>
+<div id="landing" class="panel"></div>
+<div id="mission-list" class="panel"></div>
+
+<div id="bottombar" class="panel">
+  <div class="pills">
+    <div class="pill on" id="pill-flaps">FLAPS 0°</div>
+    <div class="pill on" id="pill-gear">GEAR DOWN</div>
+  </div>
+  <canvas id="sixpack" width="372" height="66"></canvas>
+  <div class="bars">
+    <div class="bar-row"><span>THR</span><div class="bar-track"><div class="bar-fill" id="bar-thr"></div></div></div>
+    <div class="bar-row"><span>FUEL</span><div class="bar-track"><div class="bar-fill" id="bar-fuel"></div></div></div>
+    <div class="bar-row"><span>HULL</span><div class="bar-track"><div class="bar-fill" id="bar-hull"></div></div></div>
+  </div>
+  <div class="keys">
+    <button id="btn-cam"><span id="cam-label">CHASE [C]</span></button>
+    <button id="btn-missions">MISSIONS [M]</button>
+    <button id="btn-reset">RESET [R]</button>
+  </div>
+</div>
+
+<div id="wordmark">AURELIA WINGS<small>3D ARCHIPELAGO STOL FLIGHT SIMULATOR</small><span class="hint">Arrows fly · Shift/Ctrl throttle · F flaps · G gear · drag mouse to steer</span></div>
+<div id="score-chip">SCORE <span id="score">0</span></div>
+
+<script>
+  // The three quick buttons do the same as their keys; the game loop in
+  // main.js owns the real actions, so these just press the key for it.
+  function pressKey(k) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: k }));
+  }
+  document.getElementById('btn-cam').addEventListener('click', () => pressKey('c'));
+  document.getElementById('btn-missions').addEventListener('click', () => pressKey('m'));
+  document.getElementById('btn-reset').addEventListener('click', () => pressKey('r'));
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
