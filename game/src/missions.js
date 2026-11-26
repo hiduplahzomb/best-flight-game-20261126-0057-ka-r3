@@ -43,12 +43,19 @@ export const MISSIONS = [
     id: 3,
     name: 'Mountain STOL',
     short: 'Mountain STOL',
-    instruction: 'Climb the valley, land the short strip',
-    spawn: { x: 2100, alt: 170, z: -300, heading: 59, speed: 50, throttle: 0.7 },
+    // RWY 27 is a 270° runway: it is landed flying WEST, so the chain
+    // curves down the north-east ridge onto its extended centreline
+    // from the east, the heading unwinding 338° → 270° as it descends.
+    // The old chain climbed eastward toward a westbound runway, so the
+    // <25° heading check could never pass on arrival. The spawn sits
+    // inside the world clamp (x <= 3300): a spawn further east is
+    // clamped back on the first frame and leaves the first gate behind.
+    instruction: 'Curve down the north ridge, land RWY 27',
+    spawn: { x: 3300, alt: 190, z: -350, heading: 338, speed: 50, throttle: 0.7 },
     gates: [
-      { x: 2400, y: 185, z: -480 },
-      { x: 2620, y: 195, z: -620 },
-      { x: 2780, y: 175, z: -720 },
+      { x: 3220, y: 170, z: -550 },
+      { x: 3150, y: 155, z: -680 },
+      { x: 3090, y: 140, z: -745 },
     ],
     runway: 'mountain',
     gateRadius: 22,

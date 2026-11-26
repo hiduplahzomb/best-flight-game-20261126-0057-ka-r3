@@ -22,8 +22,9 @@ import {
 // the cover flies over the sea strait toward the Coral island with the
 // runway and beacon beyond the next gate; the lighthouse shot closes
 // in until the tower fills the frame behind its gate; the final is a
-// three-quarter view from beside the threshold, so the whole runway
-// reads instead of a foreshortened line.
+// chase-camera shot on the centreline of the approach — the hero
+// aircraft big in the lower frame, the whole runway ahead with its
+// beacon, chevrons and PAPI — the same framing as the cover.
 const SHOTS = {
   cover: {
     mission: 1, camera: 'chase',
@@ -41,8 +42,14 @@ const SHOTS = {
     settle: 30,
   },
   final: {
-    mission: 5, camera: 'apron',
-    stage: { x: 1980, alt: 45, z: 150, heading: 90, speed: 48, throttle: 0.45, flaps: 1, gearDown: true, gateIndex: 2 },
+    mission: 5, camera: 'chase',
+    // Short final, on the centreline: close enough that the strip
+    // reads wide — threshold bars, centreline and edge lines legible
+    // from the threshold to the far end — with the last gate glowing
+    // over the threshold, the beacon column above it and the PAPI
+    // beside it. The far tip sits behind the tail fin, as it does in
+    // any chase view; the strip itself is whole and unburied.
+    stage: { x: 2000, alt: 65, z: 150, heading: 90, speed: 48, throttle: 0.45, flaps: 1, gearDown: true, gateIndex: 1 },
     settle: 20,
   },
 };
@@ -100,9 +107,16 @@ function startGame() {
     ms = createMissionState(m);
     // A staged shot can start part-way down the gate chain, so the
     // framed gate is the one ahead of the aircraft, not one behind it.
+    // The score and fuel follow the progress: a staged mid-mission
+    // frame never shows 0 points with gates already passed, or a full
+    // tank halfway through a sortie.
     if (staged && staged.gateIndex != null) {
       ms.gateIndex = staged.gateIndex;
       ms.gatesPassed = staged.gateIndex;
+      ms.score = staged.gateIndex * 100;
+    }
+    if (staged) {
+      flight.fuel = 97 - (staged.gateIndex || 0) * 3;
     }
     // Ring facing: each gate looks back along the path that leads to it.
     let prev = [spawn.x, spawn.alt, spawn.z];
@@ -139,7 +153,11 @@ function startGame() {
   function flyAutopilot(dt) {
     const gate = nextGate(ms);
     const rwy = missionRunway(ms);
-    let target = [rwy.cx - rwy.length / 2, rwy.elev + 18, rwy.cz];
+    // The threshold is the end you fly toward: the west end for a 090
+    // runway, the east end for a 270 runway — not always the west end.
+    const hr = (rwy.heading * Math.PI) / 180;
+    let target = [rwy.cx - (rwy.length / 2) * Math.sin(hr), rwy.elev + 18,
+      rwy.cz + (rwy.length / 2) * Math.cos(hr)];
     if (gate) {
       const dx = gate.x - flight.pos[0], dz = gate.z - flight.pos[2];
       const gateHeading = (Math.atan2(dx, -dz) * 180) / Math.PI;
@@ -163,32 +181,12 @@ function startGame() {
   function updateCamera(dt) {
     const { forward, right, up } = flight.axes;
     if (camMode === 'cockpit') {
-      // Sit IN the cabin, just behind the glareshield, so the dash,
-      // pillars and yoke frame the view and the cowl sits low in it.
-      // The old seat hovered above the fuselage and showed no cockpit.
-      const eye = vadd(vadd(flight.pos, vscale(forward, -0.6)), vscale(up, 0.95));
-      const target = vadd(vadd(flight.pos, vscale(forward, 120)), vscale(up, -6));
-      camPos = eye;
-      camTarget = target;
-      return { eye, target };
-    }
-    if (camMode === 'apron') {
-      // High three-quarter view from south of the final: the plane on
-      // short final at left, the whole runway strip receding to the
-      // right. The strip sits in a valley with 50 m hills north and
-      // south, so a low side view hides it behind the slope — the
-      // camera has to be high enough to look over the ridge.
-      const rwy = missionRunway(ms);
-      const hr = (rwy.heading * Math.PI) / 180;
-      const thr = [rwy.cx - (rwy.length / 2) * Math.sin(hr), rwy.elev,
-        rwy.cz + (rwy.length / 2) * Math.cos(hr)];
-      const eye = vadd(vadd(vadd(flight.pos, vscale(right, 170)),
-        vscale(forward, -55)), vscale(up, 85));
-      const target = [
-        (flight.pos[0] + thr[0]) / 2,
-        (flight.pos[1] + thr[1]) / 2,
-        (flight.pos[2] + thr[2]) / 2,
-      ];
+      // Sit IN the cabin, behind the panel, so the low dash, pillars
+      // and yoke frame the view and the cowl sits low in it. The seat
+      // is 0.9 m behind the aircraft centre: any closer and the panel
+      // fills the frame; the old 0.6 m seat put the pilot's face on it.
+      const eye = vadd(vadd(flight.pos, vscale(forward, -0.9)), vscale(up, 0.95));
+      const target = vadd(vadd(flight.pos, vscale(forward, 120)), vscale(up, -3));
       camPos = eye;
       camTarget = target;
       return { eye, target };
@@ -393,13 +391,14 @@ function startGame() {
       renderer.drawSolid(plane.disc, discModelMatrix(flight), 0, 0.10);
       const strobe = Math.sin(simTime * 5) > 0.55 ? 1.0 : 0.25;
       renderer.drawSolid(plane.nav, model, strobe);
-      renderer.drawSolid(plane.trails, mat4Identity(), 0, 0.32);
+      renderer.drawSolid(plane.trails, mat4Identity(), 0, 0.16);
     } else {
+      // In the cockpit the props and blur discs stay out: the engines
+      // sit 3.4 m outboard and 2.75 m ahead, so from the seat only the
+      // inner edge of each disc shows — as a grey slab floating in the
+      // sky at the frame edges. The pilot sees the airframe, not them.
       renderer.drawSolid(plane.body, model);
       renderer.drawSolid(plane.cockpit, model);
-      renderer.drawSolid(plane.prop, propModelMatrix(flight, spinAngle, -3.4), 0, 0.22);
-      renderer.drawSolid(plane.prop, propModelMatrix(flight, -spinAngle, 3.4), 0, 0.22);
-      renderer.drawSolid(plane.disc, discModelMatrix(flight), 0, 0.10);
     }
     if (flight.speed > 24) {
       renderer.drawSolid(windMesh, mat4Identity(), 0, 0.2);

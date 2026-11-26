@@ -74,9 +74,11 @@ void main() {
   vec3 col = mix(horizon, mid, smoothstep(0.0, 0.18, h));
   col = mix(col, zenith, smoothstep(0.15, 0.65, h));
   float sunAmt = max(dot(d, uSunDir), 0.0);
-  col += vec3(1.0, 0.75, 0.42) * pow(sunAmt, 220.0) * 0.8;
-  col += vec3(1.0, 0.62, 0.28) * pow(sunAmt, 10.0) * 0.15;
-  col += vec3(0.95, 0.55, 0.25) * pow(sunAmt, 3.0) * 0.07;
+  // A small sun: the old wide halos (pow 10 / pow 3) blew out a
+  // quarter of the sky into a white blob. Tighter falloff, less gain.
+  col += vec3(1.0, 0.75, 0.42) * pow(sunAmt, 300.0) * 0.6;
+  col += vec3(1.0, 0.62, 0.28) * pow(sunAmt, 24.0) * 0.06;
+  col += vec3(0.95, 0.55, 0.25) * pow(sunAmt, 6.0) * 0.03;
   if (d.y < 0.0) col = mix(col, vec3(0.98, 0.68, 0.42), clamp(-d.y * 6.0, 0.0, 1.0));
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -114,8 +116,11 @@ void main() {
   vec3 refl = reflect(-uSunDir, n);
   float spec = pow(max(dot(refl, viewDir), 0.0), 90.0);
   col += vec3(1.0, 0.75, 0.45) * spec * 1.6;
-  float glitter = pow(max(0.0, sin(vWorld.x * 0.9 + uTime * 2.0) * sin(vWorld.z * 0.8 - uTime * 1.6)), 24.0);
-  col += vec3(1.0, 0.9, 0.7) * glitter * 0.35;
+  // Soft large-scale shimmer, not sparkle: the old 0.9 rad/m glitter
+  // aliased into white moiré speckle at any distance. Longer waves,
+  // gentler power, a third of the strength.
+  float glitter = pow(max(0.0, sin(vWorld.x * 0.22 + uTime * 0.8) * sin(vWorld.z * 0.19 - uTime * 0.6)), 6.0);
+  col += vec3(1.0, 0.9, 0.7) * glitter * 0.10;
   float foam = smoothstep(0.02, 0.10, land) * (0.75 + 0.25 * sin(vWorld.x * 0.6 + vWorld.z * 0.5 + uTime * 1.2));
   foam *= smoothstep(0.55, 0.12, land);
   col = mix(col, vec3(0.95, 0.98, 0.95), clamp(foam, 0.0, 1.0) * 0.8);

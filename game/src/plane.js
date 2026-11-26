@@ -60,8 +60,8 @@ export function buildPlaneMeshes(gl) {
     gear.addCylinder([s * 1.1, -2.15, -1.2], 0.55, 0.55, 0.35, 8, [0.08, 0.08, 0.09],
       mat4RotateZ(Math.PI / 2));
   }
-  gear.addCylinder([0, -1.9, 4.6], 0.1, 0.1, 1.6, 5, DARK);
-  gear.addCylinder([0, -2.6, 4.6], 0.42, 0.42, 0.3, 8, [0.08, 0.08, 0.09],
+  gear.addCylinder([0, -1.75, 4.6], 0.1, 0.1, 1.4, 5, DARK);
+  gear.addCylinder([0, -2.28, 4.6], 0.42, 0.42, 0.3, 8, [0.08, 0.08, 0.09],
     mat4RotateZ(Math.PI / 2));
   // Belly antenna and pitot.
   b.addCylinder([0, -1.05, 1.5], 0.06, 0.1, 0.7, 5, DARK);
@@ -84,38 +84,102 @@ export function buildPlaneMeshes(gl) {
       mat4RotateX(Math.PI / 2));
   }
 
-  // Cockpit frame, seen from the pilot's seat: glareshield with a gauge
-  // strip, windscreen pillars running up to the roof, yoke and side
-  // consoles. It lives inside the fuselage, so it is only drawn in
-  // cockpit view (from outside the fuselage hides it).
+  // Cockpit, seen from the pilot's seat. The seat sits 0.9 m behind the
+  // panel (eye z = +0.9 in model space), so the panel is a low brow
+  // across the bottom of the windscreen instead of a wall in the face:
+  // panel top y = 0.70 reads at ~58% of the frame, dials below it.
+  // Six lit dials (cream faces, orange needles, tick marks) sit on the
+  // panel face; a dark glareshield strip covers the nose's rear face
+  // above the panel; A-pillars run UP-FORWARD along the windscreen
+  // edges to a roof beam, framing the canopy; a shaped yoke stands in
+  // front of the panel; a cabin floor hides the wing where it passes
+  // under the fuselage, so no wing shows through the cabin floor.
+  // It lives inside the fuselage, so it is only drawn in cockpit view.
   const cockpit = new MeshBuilder();
   const DASH = [0.13, 0.14, 0.16];
   const DASH2 = [0.19, 0.20, 0.22];
-  // The panel sits at the cabin front (z = -1.2), its face toward the
-  // pilot — in front of the nose's rear face, never behind it.
-  cockpit.addBox([0, 0.45, -1.05], [1.9, 0.55, 0.55], mI, DASH);
-  cockpit.addBox([0, 0.72, -1.07], [1.9, 0.08, 0.5], mI, DASH2);
-  for (const gx of [-0.62, -0.21, 0.21, 0.62]) {
-    cockpit.addBox([gx, 0.52, -0.75], [0.24, 0.24, 0.05], mI, [0.05, 0.08, 0.10]);
-  }
+  const YOKE = [0.55, 0.56, 0.58];
+  const FLOOR = [0.30, 0.30, 0.32];
+  // Low panel at the cabin front, face toward the pilot.
+  cockpit.addBox([0, 0.50, -1.05], [1.9, 0.40, 0.35], mI, DASH);
+  // Glareshield brow over the panel top, and a dark strip above it
+  // covering the nose's rear face up to the cowl line.
+  cockpit.addBox([0, 0.71, -1.0], [1.9, 0.05, 0.35], mI, DASH2);
+  cockpit.addBox([0, 0.78, -1.18], [1.72, 0.18, 0.04], mI, DASH);
+  // Six dials: dark rim, lit face, needle and tick marks. The needle
+  // angle follows the standard gauge sweep — 270° with the gap at the
+  // bottom (min at 7:30, mid at 12, max at 4:30) — matching the HUD
+  // six-pack. `f` is the needle fraction; rotating the needle box
+  // about Z by a = 0.75π − 1.5πf points its long axis along the dial.
+  const DIAL_X = [-0.75, -0.45, -0.15, 0.15, 0.45, 0.75];
+  const DIAL_F = [0.62, null, 0.30, 0.50, 0.50, 0.66]; // ATT has no needle
+  const dialA = (f) => 0.75 * Math.PI - 1.5 * Math.PI * f;
+  const dialDir = (f) => {
+    const a = dialA(f);
+    return [-Math.sin(a), Math.cos(a)];
+  };
+  DIAL_X.forEach((gx, i) => {
+    const f = DIAL_F[i];
+    // Rim and face: cylinders tipped to face the pilot (+Z).
+    cockpit.addCylinder([gx, 0.50, -0.868], 0.115, 0.115, 0.018, 12,
+      [0.07, 0.08, 0.10], mat4RotateX(Math.PI / 2));
+    const faceCol = i === 1 ? [0.30, 0.50, 0.85] // ATT: blue sky half
+      : [0.93, 0.91, 0.80];                       // lit cream faces
+    cockpit.addCylinder([gx, 0.50, -0.864], 0.098, 0.098, 0.02, 12,
+      faceCol, mat4RotateX(Math.PI / 2));
+    // Tick marks at min / mid / max.
+    for (const tf of [0, 0.5, 1]) {
+      const [dx, dy] = dialDir(tf);
+      cockpit.addBox([gx + dx * 0.088, 0.50 + dy * 0.088, -0.854],
+        [0.014, 0.028, 0.01], mat4RotateZ(dialA(tf)), [0.12, 0.13, 0.15]);
+    }
+    if (f == null) {
+      // Attitude indicator: white horizon bar across the blue face.
+      cockpit.addBox([gx, 0.50, -0.852], [0.14, 0.02, 0.012], mI, [0.95, 0.95, 0.92]);
+    } else {
+      const [dx, dy] = dialDir(f);
+      cockpit.addBox([gx + dx * 0.03, 0.50 + dy * 0.03, -0.852],
+        [0.02, 0.085, 0.012], mat4RotateZ(dialA(f)), [1.0, 0.45, 0.12]);
+    }
+    cockpit.addBox([gx, 0.50, -0.851], [0.03, 0.03, 0.012], mI, [0.10, 0.11, 0.13]);
+  });
+  // Warm lamps on the glareshield brow.
   for (const lx of [-0.45, 0.45]) {
-    cockpit.addBox([lx, 0.78, -0.78], [0.07, 0.04, 0.07], mI, [1.0, 0.8, 0.3]);
+    cockpit.addBox([lx, 0.745, -0.95], [0.07, 0.03, 0.07], mI, [1.0, 0.8, 0.3]);
   }
-  // Dark trim across the top of the panel, hiding the white strip of
-  // the nose's rear face that used to read as a blank beige wall above
-  // the dash. It sits just in front of the firewall, flush with the
-  // nose top, so the whole panel reads as one dark instrument panel.
-  cockpit.addBox([0, 0.755, -1.19], [1.72, 0.21, 0.04], mI, DASH);
+  // A-pillars: from the panel's top corners UP-FORWARD along the
+  // windscreen edges to the roof beam — a canopy frame, not a fence
+  // rail. Thin (0.08), outboard of the nose (x = ±0.95) so the whole
+  // pillar shows instead of vanishing inside the nose box.
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.885, 0.86, -0.375], [0.13, 1.38, 0.13], mat4RotateX(1.37), DASH);
+    cockpit.addBox([s * 0.95, 0.86, -1.52], [0.08, 1.1, 0.08], mat4RotateX(-1.28), DASH);
   }
-  // Yoke: column and grip, low in the middle of the view.
-  cockpit.addBox([0, 0.18, -0.62], [0.09, 0.45, 0.09], mI, DASH);
-  cockpit.addBox([0, 0.42, -0.66], [0.55, 0.09, 0.10], mI, DASH);
-  // Side consoles flanking the seat.
+  // Roof beam across the top of the windscreen, thin so it reads as
+  // the roof edge, not a bar across the sky.
+  cockpit.addBox([0, 1.0, -2.0], [1.95, 0.05, 0.05], mI, DASH);
+  // Yoke: column, crossbar grip and two hand grips, light grey so it
+  // reads against the dark panel, tall enough to clear the panel top.
+  // The bar sits just above the dials so the whole yoke reads as one
+  // piece instead of two floating blocks.
+  cockpit.addBox([0, 0.42, -0.15], [0.09, 0.5, 0.09], mI, YOKE);
+  cockpit.addBox([0, 0.66, -0.18], [0.52, 0.09, 0.09], mI, YOKE);
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.82, 0.28, -0.35], [0.28, 0.3, 1.3], mI, [0.16, 0.17, 0.19]);
+    cockpit.addBox([s * 0.22, 0.72, -0.18], [0.09, 0.14, 0.09], mI, YOKE);
   }
+  // Cabin floor and kick panels: they sit just above the wing (top
+  // y = 0.32), so from the seat the wing never shows through the floor.
+  // Light enough to read as a floor, not a black hole.
+  cockpit.addBox([0, 0.38, 0.3], [1.9, 0.06, 2.6], mI, FLOOR);
+  for (const s of [-1, 1]) {
+    cockpit.addBox([s * 0.92, 0.50, 0.3], [0.06, 0.24, 2.6], mI, FLOOR);
+  }
+  // Side consoles flanking the seat, on the floor, with a throttle
+  // lever on the left one.
+  for (const s of [-1, 1]) {
+    cockpit.addBox([s * 0.82, 0.52, 0.35], [0.28, 0.28, 1.3], mI, [0.16, 0.17, 0.19]);
+  }
+  cockpit.addBox([-0.82, 0.72, 0.1], [0.05, 0.12, 0.05], mI, DASH);
+  cockpit.addBox([-0.82, 0.79, 0.1], [0.09, 0.05, 0.05], mI, [0.85, 0.2, 0.15]);
 
   // Navigation lights: red on the left tip, green on the right.
   const nav = new MeshBuilder();
@@ -181,7 +245,7 @@ export function updateTrails(trailsMesh, history) {
     for (let i = 0; i < n; i++) {
       const p = tip[i];
       const fade = 1 - i / n;
-      const w = 0.35 * fade + 0.05;
+      const w = 0.16 * fade + 0.02;
       pos.push(p[0], p[1] - w, p[2], p[0], p[1] + w, p[2]);
       nor.push(0, 0, 1, 0, 0, 1);
       col.push(1, 1, 1, 1, 1, 1);

@@ -12,6 +12,11 @@ export const STALL_SPEED = 26;      // m/s, clean
 export const STALL_FLAPS = 21;      // m/s, full flaps
 export const MAX_SPEED = 78;        // m/s at full throttle, level
 export const CRUISE_SPEED = 55;
+export const GEAR_CLEAR = 2.7;      // origin height above the surface
+// when the wheels touch (main wheels bottom out at -2.7 m in model
+// space). Ground contact is measured from the wheels, not the origin:
+// pinning the origin 0.4 m above the asphalt sank the belly 1.4 m
+// under it on rollout.
 
 export function createFlightState(spawn) {
   return {
@@ -111,9 +116,15 @@ export function updateFlight(state, input, dt) {
   s.speed = clamp(s.speed, 0, 95);
 
   // Climb from pitch, with lift falling away below stall speed.
+  // The stall sink only bites in the AIR: on the ground the wheels
+  // hold the aircraft up, and letting the sink run during a rollout
+  // drives the computed sink rate ever more negative as the speed
+  // decays — the touchdown gate (|vspeed| < 4.5) then fails, the
+  // aircraft sinks a frame below the surface, and the rough-ground
+  // branch chews the hull to zero on a perfectly good landing.
   const liftFactor = clamp(s.speed / stall, 0, 1.25);
   let climb = Math.sin((s.pitch * Math.PI) / 180) * s.speed * liftFactor;
-  if (s.speed < stall) {
+  if (s.speed < stall && !s.onGround) {
     // Sinking, nose drops gently instead of spinning.
     climb -= (stall - s.speed) * 1.6;
     s.pitch = lerp(s.pitch, -6, Math.min(1, dt * 0.8));
@@ -129,8 +140,8 @@ export function updateFlight(state, input, dt) {
   // and never the actual descent.
   const groundPre = groundHeight(s.pos[0], s.pos[2]);
   const rwyPre = runwayUnder(s);
-  const groundYPre = rwyPre ? rwyPre.elev : groundPre;
-  const heightPre = s.pos[1] - groundYPre;
+  const groundYPre = rwyPre ? rwyPre.elev + 0.8 : groundPre;
+  const heightPre = s.pos[1] - groundYPre - GEAR_CLEAR;
   if (heightPre < 7 && heightPre > 0 && climb < 0) {
     climb *= 1 - (1 - heightPre / 7) * 0.35;
   }
@@ -151,8 +162,11 @@ export function updateFlight(state, input, dt) {
   // --- Ground -------------------------------------------------------------
   const ground = groundHeight(s.pos[0], s.pos[2]);
   const rwy = runwayUnder(s);
-  const groundY = rwy ? rwy.elev : ground;
+  // Over a runway the surface is the asphalt top (elev + 0.8), not the
+  // carved ground: the strip box sits proud of the heightfield.
+  const groundY = rwy ? rwy.elev + 0.8 : ground;
   const heightAbove = s.pos[1] - groundY;
+  const wheelAbove = heightAbove - GEAR_CLEAR;
 
   // Gear comes down on its own on final: near a runway, low and slow.
   // It never comes down by itself in cruise.
@@ -165,10 +179,11 @@ export function updateFlight(state, input, dt) {
     }
   }
 
-  if (heightAbove <= 0.4) {
-    if (rwy && Math.abs(s.verticalSpeed) < 4.5 && s.speed > 18 &&
-        Math.abs(angleWrapDeg(s.heading - rwy.heading)) < 25) {
-      // Touchdown on the strip.
+  if (wheelAbove <= 0.4) {
+    const aligned = rwy && Math.abs(s.verticalSpeed) < 4.5 &&
+      Math.abs(angleWrapDeg(s.heading - rwy.heading)) < 25;
+    if (rwy && aligned && s.speed > 18) {
+      // Clean touchdown on the strip.
       if (!s.onGround) {
         s.touchdownFpm = s.verticalSpeed * 196.85;
         s.touchdownSpeed = s.speed;
@@ -176,18 +191,35 @@ export function updateFlight(state, input, dt) {
         s.landed = true;
       }
       s.onGround = true;
-      s.pos[1] = groundY + 0.4;
+      s.pos[1] = groundY + GEAR_CLEAR;
       s.pitch = lerp(s.pitch, 0, Math.min(1, dt * 4));
       s.roll = lerp(s.roll, 0, Math.min(1, dt * 4));
       // Roll out: brakes and drag slow the aircraft.
       const decel = s.brakes ? 14 : 5;
       s.speed = Math.max(0, s.speed - decel * dt);
       if (s.speed < 2) s.speed = 0;
-    } else if (heightAbove <= 0) {
+    } else if (s.onGround && rwy) {
+      // Already down and rolling on the strip: the rollout keeps
+      // going — and the brakes keep working — all the way to a stop,
+      // even below the 18 m/s touchdown gate. Without this the
+      // aircraft coasts at idle thrust, rolls off the end of the
+      // runway and wrecks in the rough on a perfectly good landing.
+      s.pos[1] = groundY + GEAR_CLEAR;
+      s.pitch = lerp(s.pitch, 0, Math.min(1, dt * 4));
+      s.roll = lerp(s.roll, 0, Math.min(1, dt * 4));
+      const decel = s.brakes ? 14 : 5;
+      s.speed = Math.max(0, s.speed - decel * dt);
+      if (s.speed < 2) s.speed = 0;
+    } else if (wheelAbove < -0.05) {
       // Rough ground or a hard arrival: damage, then a stop.
+      // The 5 cm dead band matters: a landed aircraft rests with its
+      // wheels exactly on the surface (wheelAbove = 0), and once it
+      // slows below the 18 m/s touchdown gate the runway branch stops
+      // running — without the dead band the rough branch would chew
+      // the hull to zero on every rollout.
       const hard = Math.abs(s.verticalSpeed) > 6 || s.speed > 60;
       s.hull = Math.max(0, s.hull - (hard ? 55 : 25));
-      s.pos[1] = groundY + 0.4;
+      s.pos[1] = groundY + GEAR_CLEAR;
       s.speed = Math.max(0, s.speed - 30 * dt);
       if (s.hull <= 0 || hard) {
         s.crashed = true;

@@ -100,11 +100,11 @@ export class Hud {
       ctx.stroke();
       if (major) {
         ctx.fillStyle = '#ffe9b0';
-        ctx.fillText(names[norm] || String(norm), x, 28);
+        if (x > 20 && x < w - 20) ctx.fillText(names[norm] || String(norm), x, 28);
       } else if (mid) {
         ctx.fillStyle = 'rgba(200,230,240,0.85)';
         ctx.font = '10px system-ui, sans-serif';
-        ctx.fillText(String(norm), x, 28);
+        if (x > 18 && x < w - 18) ctx.fillText(String(norm), x, 28);
         ctx.font = '600 11px system-ui, sans-serif';
       }
     }
@@ -157,7 +157,7 @@ export class Hud {
         ctx.fillStyle = '#dfeef4';
         ctx.font = '11px system-ui, sans-serif';
         ctx.textAlign = 'left';
-        if (y > 24 && y < h - 30) ctx.fillText(String(Math.round(v)), 24, y + 4);
+        if (y > 32 && y < h - 36) ctx.fillText(String(Math.round(v)), 24, y + 4);
       }
     }
     ctx.restore();
@@ -307,7 +307,11 @@ export class Hud {
       ctx.fillText(labelText, cx, cy + r + 10);
     };
     const needle = (cx, cy, r, frac, color) => {
-      const a = -Math.PI * 0.75 + frac * Math.PI * 1.5;
+      // Standard gauge sweep: 270°, gap at the BOTTOM — min at 7:30,
+      // mid-scale at 12, max at 4:30. (Canvas y runs down, so the arc
+      // starts at +0.75π, not −0.75π: the old start put the gap on the
+      // left and every needle 90° off.)
+      const a = Math.PI * 0.75 + frac * Math.PI * 1.5;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -323,7 +327,7 @@ export class Hud {
       ctx.strokeStyle = 'rgba(220,240,245,0.75)';
       ctx.lineWidth = 1;
       for (let i = 0; i <= 10; i++) {
-        const a = -Math.PI * 0.75 + (i / 10) * Math.PI * 1.5;
+        const a = Math.PI * 0.75 + (i / 10) * Math.PI * 1.5;
         ctx.beginPath();
         ctx.moveTo(cx + Math.cos(a) * r * 0.88, cy + Math.sin(a) * r * 0.88);
         ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
@@ -336,7 +340,7 @@ export class Hud {
       ctx.font = '700 7px system-ui, sans-serif';
       ctx.textAlign = 'center';
       for (const [frac, text] of marks) {
-        const a = -Math.PI * 0.75 + frac * Math.PI * 1.5;
+        const a = Math.PI * 0.75 + frac * Math.PI * 1.5;
         ctx.fillText(text, cx + Math.cos(a) * r * 0.62, cy + Math.sin(a) * r * 0.62 + 2.5);
       }
     };
@@ -486,7 +490,10 @@ export class Hud {
       const rwy = RUNWAYS[ms.mission.runway];
       const d = Math.hypot(flight.pos[0] - rwy.cx, flight.pos[2] - rwy.cz);
       const dist = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
-      drawTag([rwy.cx - rwy.length / 2, rwy.elev + 20, rwy.cz],
+      // Tag the threshold you actually fly toward (east end for 270).
+      const hr = (rwy.heading * Math.PI) / 180;
+      drawTag([rwy.cx - (rwy.length / 2) * Math.sin(hr), rwy.elev + 20,
+        rwy.cz + (rwy.length / 2) * Math.cos(hr)],
         `${rwy.name} · ${dist}`, true);
     }
   }

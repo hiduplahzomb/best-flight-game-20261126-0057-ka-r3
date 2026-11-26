@@ -59,11 +59,21 @@ export function groundHeight(x, z) {
     h += bump;
   }
   // Carve the runway flats: blend to the runway elevation near each strip.
+  // The strip itself sits on a HARD flat apron (dist <= 30 m from the
+  // rect): the heightfield grid is 42.67 m, wider than either runway, so
+  // a smooth blend alone leaves the two vertex rows just outside the
+  // strip higher than the asphalt top and their triangles bury the
+  // middle of the runway. Inside the apron the ground is exactly the
+  // runway elevation, so the asphalt (top at elev + 0.8) always wins.
   for (const key of Object.keys(RUNWAYS)) {
     const rwy = RUNWAYS[key];
     const d = distToRect(x, z, rwy);
-    const w = 1 - smoothstep(0, 90, d);
-    if (w > 0) h = h * (1 - w) + rwy.elev * w;
+    if (d <= 30) {
+      h = rwy.elev;
+    } else {
+      const w = 1 - smoothstep(30, 120, d);
+      if (w > 0) h = h * (1 - w) + rwy.elev * w;
+    }
   }
   // Carve a clear approach valley west of the main runway, so the final
   // approach flies over flat ground instead of the island's west slope.
@@ -203,9 +213,11 @@ export function buildWorld(gl) {
   }
 
   // Village beside the main runway's west end: white walls, red roofs.
+  // Kept clear of the runway shoulder (nearest row ~90 m off the edge):
+  // houses used to crowd the strip and read as obstacles on short final.
   const village = [[2180, 260], [2220, 300], [2260, 240], [2300, 290], [2340, 250],
     [2180, 330], [2240, 340], [2320, 330], [2380, 280], [2420, 330],
-    [2120, 280], [2360, 210], [2440, 230], [2200, 190], [2280, 180]];
+    [2120, 280], [2360, 280], [2440, 300], [2140, 260], [2200, 300]];
   for (const [x, z] of village) {
     const h = groundHeight(x, z);
     const w = 10 + rng() * 6, d = 9 + rng() * 5, ht = 5 + rng() * 3;
