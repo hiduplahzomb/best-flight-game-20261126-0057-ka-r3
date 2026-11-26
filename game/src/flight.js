@@ -22,7 +22,7 @@ export function createFlightState(spawn) {
     speed: spawn.speed,
     throttle: spawn.throttle ?? 0.62,
     flaps: 0,               // 0, 1, 2
-    gearDown: true,
+    gearDown: spawn.gearDown ?? false,
     brakes: false,
     fuel: 100,              // percent, one value only
     hull: 100,              // percent
@@ -95,8 +95,9 @@ export function updateFlight(state, input, dt) {
     }
   }
 
-  // Bank turns the nose: coordinated turn, no skid.
-  const turnRate = -Math.sin((s.roll * Math.PI) / 180) * (s.speed / 38) * 22;
+  // Bank turns the nose: coordinated turn, no skid. Positive roll is a
+  // right bank, so it turns right (heading increases with sin(roll)).
+  const turnRate = Math.sin((s.roll * Math.PI) / 180) * (s.speed / 38) * 22;
   s.heading = (s.heading + turnRate * dt + 360) % 360;
 
   // --- Speed, lift and sink ---------------------------------------------
@@ -122,6 +123,18 @@ export function updateFlight(state, input, dt) {
   const windPush = Math.sin(((s.windHeading - s.heading) * Math.PI) / 180) *
     s.windSpeed * 0.12;
 
+  // Ground effect: a cushion of lift in the last few metres. This has
+  // to damp the climb BEFORE the position is updated — damping the
+  // vertical speed after the move only changes the displayed sink rate
+  // and never the actual descent.
+  const groundPre = groundHeight(s.pos[0], s.pos[2]);
+  const rwyPre = runwayUnder(s);
+  const groundYPre = rwyPre ? rwyPre.elev : groundPre;
+  const heightPre = s.pos[1] - groundYPre;
+  if (heightPre < 7 && heightPre > 0 && climb < 0) {
+    climb *= 1 - (1 - heightPre / 7) * 0.35;
+  }
+
   s.axes = axesFromEuler(s.heading, s.pitch, s.roll);
   const fwd = s.axes.forward;
   const move = vscale(fwd, s.speed * dt);
@@ -141,9 +154,15 @@ export function updateFlight(state, input, dt) {
   const groundY = rwy ? rwy.elev : ground;
   const heightAbove = s.pos[1] - groundY;
 
-  // Ground effect: a cushion of lift in the last few metres.
-  if (heightAbove < 7 && heightAbove > 0 && s.verticalSpeed < 0) {
-    s.verticalSpeed *= 1 - (1 - heightAbove / 7) * 0.35;
+  // Gear comes down on its own on final: near a runway, low and slow.
+  // It never comes down by itself in cruise.
+  if (!s.gearDown && !s.onGround && s.speed < 65 && heightAbove < 130) {
+    for (const key of Object.keys(RUNWAYS)) {
+      const r = RUNWAYS[key];
+      const dx = Math.max(Math.abs(s.pos[0] - r.cx) - r.length / 2, 0);
+      const dz = Math.max(Math.abs(s.pos[2] - r.cz) - r.width / 2, 0);
+      if (Math.hypot(dx, dz) < 700) { s.gearDown = true; break; }
+    }
   }
 
   if (heightAbove <= 0.4) {

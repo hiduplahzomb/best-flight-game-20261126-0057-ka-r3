@@ -74,9 +74,9 @@ void main() {
   vec3 col = mix(horizon, mid, smoothstep(0.0, 0.18, h));
   col = mix(col, zenith, smoothstep(0.15, 0.65, h));
   float sunAmt = max(dot(d, uSunDir), 0.0);
-  col += vec3(1.0, 0.75, 0.42) * pow(sunAmt, 220.0) * 2.2;
-  col += vec3(1.0, 0.62, 0.28) * pow(sunAmt, 10.0) * 0.38;
-  col += vec3(0.95, 0.55, 0.25) * pow(sunAmt, 3.0) * 0.16;
+  col += vec3(1.0, 0.75, 0.42) * pow(sunAmt, 220.0) * 0.8;
+  col += vec3(1.0, 0.62, 0.28) * pow(sunAmt, 10.0) * 0.15;
+  col += vec3(0.95, 0.55, 0.25) * pow(sunAmt, 3.0) * 0.07;
   if (d.y < 0.0) col = mix(col, vec3(0.98, 0.68, 0.42), clamp(-d.y * 6.0, 0.0, 1.0));
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -204,6 +204,11 @@ export class MeshBuilder {
     this.idx = [];
   }
   addTriangle(a, b, c, color) {
+    this.addTriangleColors(a, b, c, color, color, color);
+  }
+  // Same triangle, but each vertex carries its own colour, so a mesh
+  // can shade smoothly instead of one flat colour per triangle.
+  addTriangleColors(a, b, c, ca, cb, cc) {
     const base = this.pos.length / 3;
     const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -214,10 +219,10 @@ export class MeshBuilder {
     ];
     const l = Math.hypot(n[0], n[1], n[2]) || 1;
     n = [n[0] / l, n[1] / l, n[2] / l];
-    for (const p of [a, b, c]) {
+    for (const [p, col] of [[a, ca], [b, cb], [c, cc]]) {
       this.pos.push(p[0], p[1], p[2]);
       this.nor.push(n[0], n[1], n[2]);
-      this.col.push(color[0], color[1], color[2]);
+      this.col.push(col[0], col[1], col[2]);
     }
     this.idx.push(base, base + 1, base + 2);
   }

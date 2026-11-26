@@ -4,7 +4,7 @@
 
 import { Renderer, DynamicMesh } from './renderer.js';
 import { buildWorld, buildSkyMesh, groundHeight, RUNWAYS } from './world.js';
-import { buildPlaneMeshes, planeModelMatrix, propModelMatrix, wingtipPositions, updateTrails } from './plane.js';
+import { buildPlaneMeshes, planeModelMatrix, propModelMatrix, discModelMatrix, wingtipPositions, updateTrails } from './plane.js';
 import { createFlightState, updateFlight, landingGrade, runwayUnder } from './flight.js';
 import { MISSIONS, createMissionState, updateMission, nextGate, missionRunway } from './missions.js';
 import { Hud } from './hud.js';
@@ -18,10 +18,16 @@ import {
 
 // Staged poses for real screenshots: a genuine sortie, flown by the
 // in-game autopilot for a fixed number of steps, then held still.
+// Each stage is framed so its subject is actually in the picture:
+// the cover flies over the sea strait toward the Coral island with the
+// runway and beacon beyond the next gate; the lighthouse shot closes
+// in until the tower fills the frame behind its gate; the final is a
+// three-quarter view from beside the threshold, so the whole runway
+// reads instead of a foreshortened line.
 const SHOTS = {
   cover: {
     mission: 1, camera: 'chase',
-    stage: { x: 10, alt: 132, z: -38, heading: 89, speed: 52, throttle: 0.62 },
+    stage: { x: 1500, alt: 135, z: 200, heading: 66, speed: 52, throttle: 0.62, gateIndex: 4 },
     settle: 30,
   },
   cockpit: {
@@ -31,12 +37,12 @@ const SHOTS = {
   },
   lighthouse: {
     mission: 4, camera: 'chase',
-    stage: { x: 1780, alt: 150, z: -880, heading: 60, speed: 52, throttle: 0.64 },
+    stage: { x: 2050, alt: 140, z: -1080, heading: 55, speed: 52, throttle: 0.64, gateIndex: 1 },
     settle: 30,
   },
   final: {
-    mission: 5, camera: 'chase',
-    stage: { x: 1800, alt: 70, z: 150, heading: 90, speed: 48, throttle: 0.45, flaps: 1 },
+    mission: 5, camera: 'apron',
+    stage: { x: 1980, alt: 45, z: 150, heading: 90, speed: 48, throttle: 0.45, flaps: 1, gearDown: true, gateIndex: 2 },
     settle: 20,
   },
 };
@@ -92,6 +98,12 @@ function startGame() {
     flight = createFlightState(spawn);
     if (staged && staged.flaps) flight.flaps = staged.flaps;
     ms = createMissionState(m);
+    // A staged shot can start part-way down the gate chain, so the
+    // framed gate is the one ahead of the aircraft, not one behind it.
+    if (staged && staged.gateIndex != null) {
+      ms.gateIndex = staged.gateIndex;
+      ms.gatesPassed = staged.gateIndex;
+    }
     // Ring facing: each gate looks back along the path that leads to it.
     let prev = [spawn.x, spawn.alt, spawn.z];
     m.gates.forEach((g) => {
@@ -151,10 +163,32 @@ function startGame() {
   function updateCamera(dt) {
     const { forward, right, up } = flight.axes;
     if (camMode === 'cockpit') {
-      // Sit above the fuselage, looking forward and a touch down over
-      // the nose, so the cowl sits low in frame and the gate stays clear.
-      const eye = vadd(vadd(flight.pos, vscale(forward, 0.8)), vscale(up, 2.6));
-      const target = vadd(vadd(flight.pos, vscale(forward, 120)), vscale(up, -4));
+      // Sit IN the cabin, just behind the glareshield, so the dash,
+      // pillars and yoke frame the view and the cowl sits low in it.
+      // The old seat hovered above the fuselage and showed no cockpit.
+      const eye = vadd(vadd(flight.pos, vscale(forward, -0.6)), vscale(up, 0.95));
+      const target = vadd(vadd(flight.pos, vscale(forward, 120)), vscale(up, -6));
+      camPos = eye;
+      camTarget = target;
+      return { eye, target };
+    }
+    if (camMode === 'apron') {
+      // High three-quarter view from south of the final: the plane on
+      // short final at left, the whole runway strip receding to the
+      // right. The strip sits in a valley with 50 m hills north and
+      // south, so a low side view hides it behind the slope — the
+      // camera has to be high enough to look over the ridge.
+      const rwy = missionRunway(ms);
+      const hr = (rwy.heading * Math.PI) / 180;
+      const thr = [rwy.cx - (rwy.length / 2) * Math.sin(hr), rwy.elev,
+        rwy.cz + (rwy.length / 2) * Math.cos(hr)];
+      const eye = vadd(vadd(vadd(flight.pos, vscale(right, 170)),
+        vscale(forward, -55)), vscale(up, 85));
+      const target = [
+        (flight.pos[0] + thr[0]) / 2,
+        (flight.pos[1] + thr[1]) / 2,
+        (flight.pos[2] + thr[2]) / 2,
+      ];
       camPos = eye;
       camTarget = target;
       return { eye, target };
@@ -301,30 +335,35 @@ function startGame() {
     renderer.beginFrame(view, proj, eye);
 
     // --- Draw the world -----------------------------------------------------
-    const cloudDrift = (simTime * 2.2) % 600;
-    renderer.drawSolid(world.clouds,
-      mat4Translate(cloudDrift - 300, 0, 0), 0.25, 0.96);
     renderer.drawSea(world.sea);
     renderer.drawSolid(world.terrain, mat4Identity());
     renderer.drawSolid(world.props, mat4Identity());
     renderer.drawSolid(world.lights, mat4Identity(), 0.85);
+    // Clouds after the opaque world, so hills and sea occlude them
+    // properly instead of the sea painting over them.
+    const cloudDrift = (simTime * 2.2) % 600;
+    renderer.drawSolid(world.clouds,
+      mat4Translate(cloudDrift - 300, 0, 0), 0.5, 0.9);
     // Runway beacon and glide chevrons.
     const pulse = 0.5 + 0.5 * Math.sin(simTime * 2.4);
-    renderer.drawSolid(world.beacon, mat4Identity(), 0.4, 0.22 + 0.08 * pulse);
+    renderer.drawSolid(world.beacon, mat4Identity(), 0.6, 0.30 + 0.10 * pulse);
     renderer.drawSolid(world.beaconRing, mat4Identity(), 0.6, 0.35 + 0.3 * pulse);
     renderer.drawSolid(world.chevrons, mat4Identity(), 0.55, 0.9);
     // Lighthouse beam, sweeping.
     const beamModel = mat4Multiply(
-      mat4Translate(2300, groundHeight(2300, -1250) + 27, -1250),
+      mat4Translate(2300, groundHeight(2300, -1250) + 34, -1250),
       mat4RotateY(simTime * 0.7),
     );
     renderer.drawSolid(world.beam, beamModel, 0.5, 0.16);
 
     // Gates: the active one glows, passed ones fade, later ones wait.
+    // A ring must face the incoming aircraft: its normal is the travel
+    // direction (sin h, 0, -cos h), and RotateY(a) points +Z at
+    // (sin a, 0, cos a), so the angle is 180° - heading, not heading.
     ms.mission.gates.forEach((g, i) => {
       const face = mat4Multiply(
         mat4Translate(g.x, g.y, g.z),
-        mat4RotateY((g.faceHeading * Math.PI) / 180),
+        mat4RotateY(((180 - g.faceHeading) * Math.PI) / 180),
       );
       const ringModel = mat4Multiply(face, mat4RotateX(Math.PI / 2));
       if (i < ms.gateIndex) {
@@ -346,15 +385,21 @@ function startGame() {
     const model = planeModelMatrix(flight);
     if (camMode !== 'cockpit') {
       renderer.drawSolid(plane.body, model);
-      renderer.drawSolid(plane.prop, propModelMatrix(flight, spinAngle), 0, 0.22);
-      renderer.drawSolid(plane.disc, propModelMatrix(flight, 0), 0, 0.10);
+      if (flight.gearDown) renderer.drawSolid(plane.gear, model);
+      // One prop per engine, each spinning around its own shaft; the
+      // two counter-rotate. The blur disc sits on the same shafts.
+      renderer.drawSolid(plane.prop, propModelMatrix(flight, spinAngle, -3.4), 0, 0.22);
+      renderer.drawSolid(plane.prop, propModelMatrix(flight, -spinAngle, 3.4), 0, 0.22);
+      renderer.drawSolid(plane.disc, discModelMatrix(flight), 0, 0.10);
       const strobe = Math.sin(simTime * 5) > 0.55 ? 1.0 : 0.25;
       renderer.drawSolid(plane.nav, model, strobe);
       renderer.drawSolid(plane.trails, mat4Identity(), 0, 0.32);
     } else {
       renderer.drawSolid(plane.body, model);
-      renderer.drawSolid(plane.prop, propModelMatrix(flight, spinAngle), 0, 0.22);
-      renderer.drawSolid(plane.disc, propModelMatrix(flight, 0), 0, 0.10);
+      renderer.drawSolid(plane.cockpit, model);
+      renderer.drawSolid(plane.prop, propModelMatrix(flight, spinAngle, -3.4), 0, 0.22);
+      renderer.drawSolid(plane.prop, propModelMatrix(flight, -spinAngle, 3.4), 0, 0.22);
+      renderer.drawSolid(plane.disc, discModelMatrix(flight), 0, 0.10);
     }
     if (flight.speed > 24) {
       renderer.drawSolid(windMesh, mat4Identity(), 0, 0.2);

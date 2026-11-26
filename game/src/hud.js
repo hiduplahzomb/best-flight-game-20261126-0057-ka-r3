@@ -82,11 +82,16 @@ export class Hud {
     const names = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
     ctx.font = '600 11px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    for (let d = -40; d <= 40; d += 5) {
-      const deg = Math.round((heading + d + 360) % 360);
-      const x = cx + d * pxPerDeg;
-      const major = deg % 45 === 0;
-      const mid = deg % 15 === 0;
+    // Snap ticks to absolute 5° steps, so the numbers are always there.
+    // The old loop stepped from heading ± 40, and deg % 15 == 0 almost
+    // never landed on a tick unless the heading itself was a multiple
+    // of 5 — at 089° or 127° the tape was blank.
+    const first = Math.floor((heading - 40) / 5) * 5;
+    for (let deg = first; deg <= heading + 40; deg += 5) {
+      const norm = ((deg % 360) + 360) % 360;
+      const x = cx + (deg - heading) * pxPerDeg;
+      const major = norm % 45 === 0;
+      const mid = norm % 15 === 0;
       ctx.strokeStyle = major ? '#ffd27a' : 'rgba(200,230,240,0.7)';
       ctx.lineWidth = major ? 2 : 1;
       ctx.beginPath();
@@ -95,11 +100,11 @@ export class Hud {
       ctx.stroke();
       if (major) {
         ctx.fillStyle = '#ffe9b0';
-        ctx.fillText(names[deg] || String(deg), x, 28);
+        ctx.fillText(names[norm] || String(norm), x, 28);
       } else if (mid) {
         ctx.fillStyle = 'rgba(200,230,240,0.85)';
         ctx.font = '10px system-ui, sans-serif';
-        ctx.fillText(String(deg), x, 28);
+        ctx.fillText(String(norm), x, 28);
         ctx.font = '600 11px system-ui, sans-serif';
       }
     }
@@ -203,6 +208,25 @@ export class Hud {
       ctx.lineTo(toX(r.cx + r.length / 2), toY(r.cz));
       ctx.stroke();
     }
+    // Route: spawn → gates in order → runway threshold, dashed gold.
+    {
+      const route = [[ms.mission.spawn.x, ms.mission.spawn.z]];
+      for (const g of ms.mission.gates) route.push([g.x, g.z]);
+      const rwy = RUNWAYS[ms.mission.runway];
+      const hr = (rwy.heading * Math.PI) / 180;
+      route.push([rwy.cx - (rwy.length / 2) * Math.sin(hr),
+        rwy.cz + (rwy.length / 2) * Math.cos(hr)]);
+      ctx.strokeStyle = 'rgba(255, 196, 77, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      route.forEach(([x, z], i) => {
+        if (i === 0) ctx.moveTo(toX(x), toY(z));
+        else ctx.lineTo(toX(x), toY(z));
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // Gates in order.
     const gates = ms.mission.gates;
     ctx.font = '700 8px system-ui, sans-serif';
@@ -248,12 +272,14 @@ export class Hud {
     ctx.clearRect(0, 0, w, h);
     const dials = 6;
     const dw = w / dials;
-    const cx0 = dw / 2, cy = h / 2 + 2, r = Math.min(dw / 2 - 5, h / 2 - 6);
+    // Leave a strip under each dial face for its label: with the old
+    // radius the label baseline fell past the canvas edge.
+    const cx0 = dw / 2, cy = h / 2 - 2, r = Math.min(dw / 2 - 5, h / 2 - 12);
     const speedKt = flight.speed * KT;
     const altFt = flight.pos[1] * FT;
     const vsi = flight.verticalSpeed * FPM;
 
-    const dial = (i, draw) => {
+    const dial = (i, labelText, draw) => {
       const cx = cx0 + i * dw;
       ctx.fillStyle = 'rgba(8, 16, 26, 0.7)';
       ctx.strokeStyle = 'rgba(120, 200, 220, 0.4)';
@@ -273,6 +299,12 @@ export class Hud {
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
+      // The label lives BELOW the dial face, outside the clip: drawing
+      // it inside the clipped draw() cut it off entirely.
+      ctx.fillStyle = 'rgba(220,240,245,0.85)';
+      ctx.font = '600 8px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(labelText, cx, cy + r + 10);
     };
     const needle = (cx, cy, r, frac, color) => {
       const a = -Math.PI * 0.75 + frac * Math.PI * 1.5;
@@ -298,19 +330,23 @@ export class Hud {
         ctx.stroke();
       }
     };
-    const label = (cx, text) => {
-      ctx.fillStyle = 'rgba(220,240,245,0.85)';
-      ctx.font = '600 8px system-ui, sans-serif';
+    // Small scale numbers inside the dial face: [needle fraction, text].
+    const nums = (cx, cy, r, marks) => {
+      ctx.fillStyle = 'rgba(220,240,245,0.9)';
+      ctx.font = '700 7px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(text, cx, cy + r + 10);
+      for (const [frac, text] of marks) {
+        const a = -Math.PI * 0.75 + frac * Math.PI * 1.5;
+        ctx.fillText(text, cx + Math.cos(a) * r * 0.62, cy + Math.sin(a) * r * 0.62 + 2.5);
+      }
     };
 
-    dial(0, (cx, cy, r) => { // ASI
+    dial(0, 'KT', (cx, cy, r) => { // ASI
       ticks(cx, cy, r);
+      nums(cx, cy, r, [[0, '0'], [0.25, '30'], [0.5, '60'], [0.75, '90'], [1, '120']]);
       needle(cx, cy, r, clamp(speedKt / 120, 0, 1), '#8fe3f5');
-      label(cx, 'KT');
     });
-    dial(1, (cx, cy, r) => { // Attitude
+    dial(1, 'ATT', (cx, cy, r) => { // Attitude
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate((-flight.roll * Math.PI) / 180);
@@ -325,14 +361,13 @@ export class Hud {
       ctx.fillStyle = '#ffd27a';
       ctx.fillRect(cx - r * 0.55, cy - 1.5, r * 0.4, 3);
       ctx.fillRect(cx + r * 0.15, cy - 1.5, r * 0.4, 3);
-      label(cx, 'ATT');
     });
-    dial(2, (cx, cy, r) => { // Altimeter
+    dial(2, 'ALT FT', (cx, cy, r) => { // Altimeter
       ticks(cx, cy, r);
+      nums(cx, cy, r, [[0, '0'], [0.25, '3'], [0.5, '6'], [0.75, '9']]);
       needle(cx, cy, r, clamp((altFt % 1000) / 1000, 0, 1), '#8fe3f5');
-      label(cx, 'ALT FT');
     });
-    dial(3, (cx, cy, r) => { // Heading
+    dial(3, 'HDG', (cx, cy, r) => { // Heading
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate((-flight.heading * Math.PI) / 180);
@@ -349,17 +384,16 @@ export class Hud {
       ctx.moveTo(cx - 4, cy - r + 2); ctx.lineTo(cx + 4, cy - r + 2); ctx.lineTo(cx, cy - r + 9);
       ctx.closePath();
       ctx.fill();
-      label(cx, 'HDG');
     });
-    dial(4, (cx, cy, r) => { // VSI
+    dial(4, 'VSI', (cx, cy, r) => { // VSI, ×100 FPM
       ticks(cx, cy, r);
+      nums(cx, cy, r, [[0, '-20'], [0.5, '0'], [1, '+20']]);
       needle(cx, cy, r, clamp(vsi / 2000 / 2 + 0.5, 0, 1), vsi < -100 ? '#ffb066' : '#8fe3f5');
-      label(cx, 'VSI');
     });
-    dial(5, (cx, cy, r) => { // Throttle / RPM
+    dial(5, 'THR', (cx, cy, r) => { // Throttle / RPM
       ticks(cx, cy, r);
+      nums(cx, cy, r, [[0, '0'], [0.5, '50'], [1, '100']]);
       needle(cx, cy, r, clamp(flight.throttle, 0, 1), '#ffd27a');
-      label(cx, 'THR');
     });
   }
 
@@ -370,13 +404,15 @@ export class Hud {
     ctx.clearRect(0, 0, w, h);
     const cx = w / 2, cy = h * 0.52;
     // Pitch ladder, thin and quiet, centred where the nose points.
+    // The whole ladder slides with pitch (nose up → horizon drops on
+    // screen); the old code only rolled it, so it never moved.
     ctx.save();
-    ctx.translate(cx, cy);
+    const pxPerDeg = 4.5;
+    ctx.translate(cx, cy + flight.pitch * pxPerDeg);
     ctx.rotate((-flight.roll * Math.PI) / 180);
     ctx.strokeStyle = 'rgba(230, 245, 250, 0.5)';
     ctx.fillStyle = 'rgba(230, 245, 250, 0.6)';
     ctx.lineWidth = 1.4;
-    const pxPerDeg = 4.5;
     ctx.beginPath();
     ctx.moveTo(-w * 0.22, 0);
     ctx.lineTo(w * 0.22, 0);
@@ -477,7 +513,7 @@ export class Hud {
     this.missionLine.textContent = gate
       ? `Next gate ${distText} — then land ${RUNWAYS[ms.mission.runway].name}`
       : `All gates clear — land ${RUNWAYS[ms.mission.runway].name}`;
-    this.missionProg.textContent = `Score ${ms.score}  ·  Fuel ${Math.round(flight.fuel)}%`;
+    this.missionProg.textContent = `Fuel ${Math.round(flight.fuel)}%`;
 
     const setBar = (el, frac, color) => {
       el.style.width = `${clamp(frac * 100, 0, 100).toFixed(0)}%`;

@@ -59,10 +59,12 @@ export function axesFromEuler(headingDeg, pitchDeg, rollDeg) {
   // Forward: heading around Y, then pitch up.
   const forward = [sh * cp, sp, -ch * cp];
   // Right: forward crossed with world up, then rolled around forward.
+  // Positive roll banks RIGHT (right wing down): rotating the right
+  // vector toward the ground, so right = right0*cos(r) - up0*sin(r).
   const right0 = [ch, 0, sh];
   const up0 = vcross(right0, forward);
-  const right = vadd(vscale(right0, cr), vscale(up0, sr));
-  const up = vsub(vscale(up0, cr), vscale(right0, sr));
+  const right = vsub(vscale(right0, cr), vscale(up0, sr));
+  const up = vadd(vscale(up0, cr), vscale(right0, sr));
   return { forward: vnorm(forward), right: vnorm(right), up: vnorm(up) };
 }
 
@@ -106,11 +108,15 @@ export function mat4LookAt(eye, target, up) {
 }
 
 // Build a model matrix from a position and the aircraft axes.
+// Column-major, the way WebGL expects it: each basis vector is one
+// COLUMN (right, up, -forward — the model nose points toward -Z), not
+// a row. Writing them as rows transposes the rotation, which used to
+// make the aircraft fly backwards and bank the wrong way.
 export function mat4FromAxes(pos, right, up, forward) {
   return [
-    right[0], up[0], -forward[0], 0,
-    right[1], up[1], -forward[1], 0,
-    right[2], up[2], -forward[2], 0,
+    right[0], right[1], right[2], 0,
+    up[0], up[1], up[2], 0,
+    -forward[0], -forward[1], -forward[2], 0,
     pos[0], pos[1], pos[2], 1,
   ];
 }

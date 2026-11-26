@@ -73,7 +73,7 @@ export const MISSIONS = [
     name: 'Crosswind Final',
     short: 'Crosswind Final',
     instruction: 'Hold the centreline in the crosswind',
-    spawn: { x: 1500, alt: 120, z: 150, heading: 90, speed: 50, throttle: 0.55 },
+    spawn: { x: 1500, alt: 120, z: 150, heading: 90, speed: 50, throttle: 0.55, gearDown: true },
     gates: [
       { x: 1950, y: 100, z: 150 },
       { x: 2120, y: 60, z: 150 },

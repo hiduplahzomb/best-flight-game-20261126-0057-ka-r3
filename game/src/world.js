@@ -31,7 +31,7 @@ export const RUNWAYS = {
     length: 560, width: 28, elev: 8,
   },
   mountain: {
-    name: 'RWY 27', cx: 2900, cz: -750, heading: 90,
+    name: 'RWY 27', cx: 2900, cz: -750, heading: 270,
     length: 340, width: 20, elev: 118,
   },
 };
@@ -44,7 +44,10 @@ function distToRect(x, z, rwy) {
 }
 
 export function groundHeight(x, z) {
-  let h = 0;
+  // The sea floor sits at -8: between islands the ground is below the
+  // sea plane (y = 0), so the water shows. The old all-positive sum
+  // kept a paper-thin sheet of land over the whole sea and hid it.
+  let h = -8;
   for (const isl of ISLANDS) {
     const dx = x - isl.x, dz = z - isl.z;
     const d2 = (dx * dx + dz * dz) / (isl.r * isl.r);
@@ -76,8 +79,10 @@ export function groundHeight(x, z) {
   return h;
 }
 
-function terrainColor(h, slope, rng) {
-  const jitter = (rng() - 0.5) * 0.10;
+function terrainColor(h, slope, jitter) {
+  // `jitter` is a per-vertex value in [-0.5, 0.5]: small and smooth, so
+  // the ground reads as meadow and sand instead of a checkerboard.
+  const j = jitter * 0.05;
   let c;
   if (h < 1.5) c = [0.86, 0.76, 0.55];                    // sand
   else if (h < 6) c = [0.55, 0.68, 0.35];                // pale shore grass
@@ -85,7 +90,7 @@ function terrainColor(h, slope, rng) {
   else if (h < 55) c = [0.32, 0.58, 0.27];              // meadow green
   else if (h < 95) c = [0.22, 0.46, 0.22];              // deep forest green
   else c = [0.45, 0.42, 0.36];                           // high rock
-  return [c[0] + jitter, c[1] + jitter, c[2] + jitter];
+  return [c[0] + j, c[1] + j, c[2] + j];
 }
 
 export function buildWorld(gl) {
@@ -104,16 +109,30 @@ export function buildWorld(gl) {
       }
       H.push(row);
     }
+    // Colours are per vertex (height and slope at that vertex), with a
+    // tiny deterministic jitter — one colour per triangle was the
+    // checkerboard patchwork in the old screenshots.
+    const C = [];
+    for (let j = 0; j <= N; j++) {
+      const row = [];
+      for (let i = 0; i <= N; i++) {
+        const s = (Math.abs(H[j][Math.min(i + 1, N)] - H[j][i]) +
+          Math.abs(H[Math.min(j + 1, N)][i] - H[j][i])) / step;
+        const jx = ((((Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1) + 1) % 1) - 0.5;
+        row.push(terrainColor(H[j][i], s, jx));
+      }
+      C.push(row);
+    }
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const x0 = -HALF + i * step, z0 = -HALF + j * step;
         const x1 = x0 + step, z1 = z0 + step;
         const h00 = H[j][i], h10 = H[j][i + 1], h01 = H[j + 1][i], h11 = H[j + 1][i + 1];
-        const slope = Math.abs(h10 - h00) / step + Math.abs(h01 - h00) / step;
-        const c00 = terrainColor(h00, slope, rng);
         // Winding is chosen so the face normal points up, toward the sun.
-        b.addTriangle([x0, h00, z0], [x1, h11, z1], [x1, h10, z0], c00);
-        b.addTriangle([x0, h00, z0], [x0, h01, z1], [x1, h11, z1], c00);
+        b.addTriangleColors([x0, h00, z0], [x1, h11, z1], [x1, h10, z0],
+          C[j][i], C[j + 1][i + 1], C[j][i + 1]);
+        b.addTriangleColors([x0, h00, z0], [x0, h01, z1], [x1, h11, z1],
+          C[j][i], C[j + 1][i], C[j + 1][i + 1]);
       }
     }
     out.terrain = b.build(gl);
@@ -140,10 +159,13 @@ export function buildWorld(gl) {
   }
 
   // ---- Sea (one big quad) ---------------------------------------------
+  // Winding matters: the quad must face UP, or backface culling hides
+  // the whole sea from the air. (The old order faced down, so the sea
+  // never rendered at all and the sand-coloured sea floor showed.)
   {
     const b = new MeshBuilder();
     const S = 6400;
-    b.addQuad([-S, 0, -S], [S, 0, -S], [S, 0, S], [-S, 0, S], [1, 1, 1]);
+    b.addQuad([-S, 0, -S], [-S, 0, S], [S, 0, S], [S, 0, -S], [1, 1, 1]);
     out.sea = b.build(gl);
   }
 
@@ -212,33 +234,42 @@ export function buildWorld(gl) {
     props.addBox([tx, th + 27.5, tz], [12, 1.2, 12], mat4Identity(), [0.85, 0.85, 0.86]);
   }
 
-  // Lighthouse on its isle, white with red bands.
+  // Lighthouse on its isle, white with red bands — tall enough to read
+  // from the approach (about 40 m to the lamp).
   {
     const lx = 2300, lz = -1250, lh = groundHeight(lx, lz);
-    props.addCylinder([lx, lh + 4, lz], 7, 8.5, 8, 10, [0.90, 0.88, 0.84]);
-    props.addCylinder([lx, lh + 11, lz], 6, 7, 6, 10, [0.78, 0.20, 0.16]);
-    props.addCylinder([lx, lh + 17, lz], 5, 6, 6, 10, [0.90, 0.88, 0.84]);
-    props.addCylinder([lx, lh + 22, lz], 4.2, 5, 4, 10, [0.78, 0.20, 0.16]);
-    props.addBox([lx, lh + 26, lz], [7, 4.5, 7], mat4Identity(), [0.12, 0.14, 0.16]);
-    lights.addSphere([lx, lh + 27, lz], 2.2, [1.0, 0.95, 0.6], 8, 6);
+    props.addCylinder([lx, lh + 5, lz], 7.5, 9, 10, 10, [0.90, 0.88, 0.84]);
+    props.addCylinder([lx, lh + 13.5, lz], 6.5, 7.5, 7, 10, [0.78, 0.20, 0.16]);
+    props.addCylinder([lx, lh + 20.5, lz], 5.5, 6.5, 7, 10, [0.90, 0.88, 0.84]);
+    props.addCylinder([lx, lh + 27, lz], 4.5, 5.5, 6, 10, [0.78, 0.20, 0.16]);
+    props.addBox([lx, lh + 32.5, lz], [8, 5, 8], mat4Identity(), [0.12, 0.14, 0.16]);
+    lights.addSphere([lx, lh + 34, lz], 3.0, [1.0, 0.95, 0.6], 8, 6);
   }
 
   // Runway strips: asphalt, threshold bars, centreline dashes, edge lights.
   for (const key of Object.keys(RUNWAYS)) {
     const rwy = RUNWAYS[key];
     const e = rwy.elev;
-    props.addBox([rwy.cx, e + 0.15, rwy.cz], [rwy.length, 0.3, rwy.width],
-      mat4Identity(), [0.20, 0.20, 0.22]);
+    // The strip sits visibly proud of the terrain (0.8 m): flush with
+    // the carved ground it z-fought with the heightfield at 500 m and
+    // the asphalt vanished, leaving only the markings.
+    props.addBox([rwy.cx, e + 0.5, rwy.cz], [rwy.length, 0.6, rwy.width],
+      mat4Identity(), [0.15, 0.15, 0.17]);
+    // White edge lines, so the strip reads as a runway from a distance.
+    for (const s of [-1, 1]) {
+      props.addBox([rwy.cx, e + 0.85, rwy.cz + s * (rwy.width / 2 - 1)],
+        [rwy.length, 0.12, 1.4], mat4Identity(), [0.95, 0.95, 0.9]);
+    }
     const nDash = Math.floor(rwy.length / 40);
     for (let i = 0; i < nDash; i++) {
       const x = rwy.cx - rwy.length / 2 + 20 + i * 40;
-      props.addBox([x, e + 0.35, rwy.cz], [18, 0.12, 1.6], mat4Identity(), [0.95, 0.95, 0.9]);
+      props.addBox([x, e + 0.85, rwy.cz], [18, 0.12, 1.6], mat4Identity(), [0.95, 0.95, 0.9]);
     }
     for (const s of [-1, 1]) {
       for (let i = 0; i < 4; i++) {
         const x = rwy.cx + s * (rwy.length / 2 - 14 - i * 7);
-        props.addBox([x, e + 0.35, rwy.cz - 7], [4.5, 0.12, 2.4], mat4Identity(), [0.95, 0.95, 0.9]);
-        props.addBox([x, e + 0.35, rwy.cz + 7], [4.5, 0.12, 2.4], mat4Identity(), [0.95, 0.95, 0.9]);
+        props.addBox([x, e + 0.85, rwy.cz - 7], [4.5, 0.12, 2.4], mat4Identity(), [0.95, 0.95, 0.9]);
+        props.addBox([x, e + 0.85, rwy.cz + 7], [4.5, 0.12, 2.4], mat4Identity(), [0.95, 0.95, 0.9]);
       }
     }
     const nLights = Math.floor(rwy.length / 45);
@@ -281,9 +312,11 @@ export function buildWorld(gl) {
       const y = rwy.elev + 6 + d * Math.tan((3 * Math.PI) / 180);
       const z = rwy.cz;
       const s = 9;
-      b.addTriangle([x - s, y, z - s], [x + s, y, z], [x - s, y, z + s],
+      // Wound to face up, like the sea: the old order faced down and
+      // backface culling hid the chevrons from the approaching aircraft.
+      b.addTriangle([x - s, y, z - s], [x - s, y, z + s], [x + s, y, z],
         [0.35, 0.95, 0.95]);
-      b.addTriangle([x - s, y, z - s * 0.55], [x + s * 0.4, y, z], [x - s, y, z + s * 0.55],
+      b.addTriangle([x - s, y, z - s * 0.55], [x - s, y, z + s * 0.55], [x + s * 0.4, y, z],
         [0.65, 1.0, 1.0]);
     }
     out.chevrons = b.build(gl);
@@ -312,7 +345,9 @@ export function buildWorld(gl) {
       const tip = [0, 0, 0];
       const p0 = [len, Math.cos(a0) * 9, Math.sin(a0) * 9];
       const p1 = [len, Math.cos(a1) * 9, Math.sin(a1) * 9];
-      b.addTriangle(tip, p0, p1, [1.0, 0.95, 0.6]);
+      // (tip, p1, p0): the cone surface must face outward, or culling
+      // hides the beam from outside.
+      b.addTriangle(tip, p1, p0, [1.0, 0.95, 0.6]);
     }
     out.beam = b.build(gl);
   }
@@ -328,8 +363,10 @@ export function buildWorld(gl) {
       if (Math.hypot(x, z) < 700) continue;
       const y = 320 + crng() * 180;
       const s = 40 + crng() * 70;
-      const warm = 0.92 + crng() * 0.08;
-      const col = [1.0 * warm, 0.93 * warm, 0.85 * warm];
+      // Near-white puffs: the old warm tan read as dark rock slabs
+      // from below, where the sun never reaches the underside.
+      const bright = 0.96 + crng() * 0.04;
+      const col = [1.0 * bright, 0.98 * bright, 0.95 * bright];
       b.addSphere([x, y, z], s, col, 8, 5, 0.45);
       b.addSphere([x + s * 0.7, y + s * 0.12, z + s * 0.2], s * 0.7, col, 8, 5, 0.45);
       b.addSphere([x - s * 0.7, y + s * 0.08, z - s * 0.15], s * 0.6, col, 8, 5, 0.45);
