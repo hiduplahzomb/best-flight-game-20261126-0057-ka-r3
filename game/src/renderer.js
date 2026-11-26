@@ -115,12 +115,11 @@ void main() {
   vec3 viewDir = normalize(uCamPos - vWorld);
   vec3 refl = reflect(-uSunDir, n);
   float spec = pow(max(dot(refl, viewDir), 0.0), 90.0);
-  col += vec3(1.0, 0.75, 0.45) * spec * 1.6;
-  // Soft large-scale shimmer, not sparkle: the old 0.9 rad/m glitter
-  // aliased into white moiré speckle at any distance. Longer waves,
-  // gentler power, a third of the strength.
-  float glitter = pow(max(0.0, sin(vWorld.x * 0.22 + uTime * 0.8) * sin(vWorld.z * 0.19 - uTime * 0.6)), 6.0);
-  col += vec3(1.0, 0.9, 0.7) * glitter * 0.10;
+  // Gentle sun glitter only: the old *1.6 gain painted hard zebra
+  // bands across the water at a distance.
+  col += vec3(1.0, 0.75, 0.45) * spec * 0.5;
+  // No dot-grid glitter: the old sin(x*0.22)*sin(z*0.19) term aliased
+  // into rows of bright dots (a visible grid) on the sea.
   float foam = smoothstep(0.02, 0.10, land) * (0.75 + 0.25 * sin(vWorld.x * 0.6 + vWorld.z * 0.5 + uTime * 1.2));
   foam *= smoothstep(0.55, 0.12, land);
   col = mix(col, vec3(0.95, 0.98, 0.95), clamp(foam, 0.0, 1.0) * 0.8);

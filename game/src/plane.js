@@ -60,8 +60,14 @@ export function buildPlaneMeshes(gl) {
     gear.addCylinder([s * 1.1, -2.15, -1.2], 0.55, 0.55, 0.35, 8, [0.08, 0.08, 0.09],
       mat4RotateZ(Math.PI / 2));
   }
-  gear.addCylinder([0, -1.75, 4.6], 0.1, 0.1, 1.4, 5, DARK);
-  gear.addCylinder([0, -2.28, 4.6], 0.42, 0.42, 0.3, 8, [0.08, 0.08, 0.09],
+  // Nose gear: a short strut under the nose belly (bottom y = -0.85)
+  // with the wheel bottom at y = -2.70, level with the main wheels.
+  // The old third wheel sat under the TAIL (z = +4.6) on a long strut
+  // that stopped 0.55 m short of the tail belly (y = -0.50), so it
+  // floated in mid-air — and, nearest the chase camera, it projected
+  // as a black pole splitting the runway threshold in the final shot.
+  gear.addCylinder([0, -1.57, -2.6], 0.1, 0.1, 1.45, 5, DARK);
+  gear.addCylinder([0, -2.28, -2.6], 0.42, 0.42, 0.3, 8, [0.08, 0.08, 0.09],
     mat4RotateZ(Math.PI / 2));
   // Belly antenna and pitot.
   b.addCylinder([0, -1.05, 1.5], 0.06, 0.1, 0.7, 5, DARK);
@@ -147,24 +153,33 @@ export function buildPlaneMeshes(gl) {
   for (const lx of [-0.45, 0.45]) {
     cockpit.addBox([lx, 0.745, -0.95], [0.07, 0.03, 0.07], mI, [1.0, 0.8, 0.3]);
   }
-  // A-pillars: from the panel's top corners UP-FORWARD along the
-  // windscreen edges to the roof beam — a canopy frame, not a fence
-  // rail. Thin (0.08), outboard of the nose (x = ±0.95) so the whole
-  // pillar shows instead of vanishing inside the nose box.
+  // A-pillars: from the panel's top corners steeply UP-FORWARD to the
+  // roof beam — a canopy frame, not a fence rail. Thin (0.08), outboard
+  // of the nose (x = ±0.95) so the whole pillar shows instead of
+  // vanishing inside the nose box. The old pillars lay almost flat
+  // (rotated -1.28 rad) and the beam sat at y = 1.0, only 5 cm above
+  // the pilot's eye — a black bar straight across the horizon that cut
+  // the gate ring in two. Now the frame sits ~18° above horizontal,
+  // near the top of the windscreen, well clear of the horizon and the
+  // gate: beam y = 1.9, pillars tilted -0.68 rad from vertical.
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.95, 0.86, -1.52], [0.08, 1.1, 0.08], mat4RotateX(-1.28), DASH);
+    cockpit.addBox([s * 0.95, 1.31, -1.53], [0.08, 1.52, 0.08], mat4RotateX(-0.68), DASH);
   }
   // Roof beam across the top of the windscreen, thin so it reads as
   // the roof edge, not a bar across the sky.
-  cockpit.addBox([0, 1.0, -2.0], [1.95, 0.05, 0.05], mI, DASH);
-  // Yoke: column, crossbar grip and two hand grips, light grey so it
-  // reads against the dark panel, tall enough to clear the panel top.
-  // The bar sits just above the dials so the whole yoke reads as one
-  // piece instead of two floating blocks.
-  cockpit.addBox([0, 0.42, -0.15], [0.09, 0.5, 0.09], mI, YOKE);
-  cockpit.addBox([0, 0.66, -0.18], [0.52, 0.09, 0.09], mI, YOKE);
+  cockpit.addBox([0, 1.9, -2.0], [1.95, 0.05, 0.05], mI, DASH);
+  // Yoke: low and compact, tucked BELOW the dial row. The old yoke's
+  // crossbar sat at y = 0.66, z = -0.18 — from the pilot's eye that
+  // projects onto the dial faces (dial centres read at ~14° below
+  // horizontal; the old bar at ~15°), hiding dials 3–4 almost fully
+  // and dials 2 & 5 halfway. The new bar tops out at y = 0.57, which
+  // projects ~19.5° below horizontal, just under the dial bottoms
+  // (~17.7°), so all six dials read whole; the column rises from the
+  // floor between the side consoles, in the gap between dials 3 and 4.
+  cockpit.addBox([0, 0.34, -0.15], [0.08, 0.40, 0.08], mI, YOKE);
+  cockpit.addBox([0, 0.54, -0.18], [0.38, 0.06, 0.08], mI, YOKE);
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.22, 0.72, -0.18], [0.09, 0.14, 0.09], mI, YOKE);
+    cockpit.addBox([s * 0.16, 0.53, -0.18], [0.07, 0.06, 0.07], mI, YOKE);
   }
   // Cabin floor and kick panels: they sit just above the wing (top
   // y = 0.32), so from the seat the wing never shows through the floor.

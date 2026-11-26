@@ -406,10 +406,18 @@ export class Hud {
     const ctx = setupCanvas(c);
     const w = c.clientWidth, h = c.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    const cx = w / 2, cy = h * 0.52;
+    const cx = w / 2;
+    // In the cockpit the old centre (h*0.52) put the crosshair and the
+    // pitch ladder on the black glareshield, below the horizon — the
+    // ladder rungs hung over the dashboard. In cockpit view the marker
+    // rides up into the windscreen sky (h*0.40) and the ladder is
+    // hidden: the attitude dial already shows pitch, and a ladder here
+    // would only cross the gate ring. Chase view keeps the full ladder.
+    const cy = camMode === 'cockpit' ? h * 0.40 : h * 0.52;
     // Pitch ladder, thin and quiet, centred where the nose points.
     // The whole ladder slides with pitch (nose up → horizon drops on
     // screen); the old code only rolled it, so it never moved.
+    if (camMode !== 'cockpit') {
     ctx.save();
     const pxPerDeg = 4.5;
     ctx.translate(cx, cy + flight.pitch * pxPerDeg);
@@ -433,6 +441,7 @@ export class Hud {
       ctx.fillText(String(Math.abs(deg)), len + 5, y + 3);
     }
     ctx.restore();
+    }
     // Flight-path marker.
     ctx.strokeStyle = 'rgba(255, 210, 122, 0.85)';
     ctx.lineWidth = 1.6;
