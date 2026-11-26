@@ -109,18 +109,21 @@ void main() {
   vec3 deep = vec3(0.05, 0.30, 0.45);
   vec3 shallow = vec3(0.15, 0.62, 0.66);
   vec3 col = mix(deep, shallow, clamp(land * 1.4, 0.0, 1.0));
-  float w1 = sin(vWorld.x * 0.11 + uTime * 0.7) * sin(vWorld.z * 0.13 - uTime * 0.5);
-  float w2 = sin((vWorld.x + vWorld.z) * 0.05 + uTime * 0.35);
-  vec3 n = normalize(vec3(w1 * 0.10, 1.0, w2 * 0.10));
+  // The sea is FLAT: no wave normal at all. The old sin-product normal
+  // (wavelength ~50 m) aliased at distance into hard white-blue zebra
+  // bands across the strait — the moire in the cover shot. A flat
+  // normal leaves only a broad, soft sun path: pow 6, low gain, no
+  // stripes at any range.
+  vec3 n = vec3(0.0, 1.0, 0.0);
   vec3 viewDir = normalize(uCamPos - vWorld);
   vec3 refl = reflect(-uSunDir, n);
-  float spec = pow(max(dot(refl, viewDir), 0.0), 90.0);
-  // Gentle sun glitter only: the old *1.6 gain painted hard zebra
-  // bands across the water at a distance.
-  col += vec3(1.0, 0.75, 0.45) * spec * 0.5;
+  float spec = pow(max(dot(refl, viewDir), 0.0), 6.0);
+  col += vec3(1.0, 0.75, 0.45) * spec * 0.10;
   // No dot-grid glitter: the old sin(x*0.22)*sin(z*0.19) term aliased
   // into rows of bright dots (a visible grid) on the sea.
-  float foam = smoothstep(0.02, 0.10, land) * (0.75 + 0.25 * sin(vWorld.x * 0.6 + vWorld.z * 0.5 + uTime * 1.2));
+  // Foam is a smooth shoreline band only: the old sin(x*0.6+z*0.5)
+  // modulation (~10 m wavelength) aliased into stripes near the shore.
+  float foam = smoothstep(0.02, 0.10, land);
   foam *= smoothstep(0.55, 0.12, land);
   col = mix(col, vec3(0.95, 0.98, 0.95), clamp(foam, 0.0, 1.0) * 0.8);
   float dist = distance(uCamPos, vWorld);

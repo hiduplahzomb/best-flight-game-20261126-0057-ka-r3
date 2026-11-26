@@ -157,7 +157,10 @@ export class Hud {
         ctx.fillStyle = '#dfeef4';
         ctx.font = '11px system-ui, sans-serif';
         ctx.textAlign = 'left';
-        if (y > 32 && y < h - 36) ctx.fillText(String(Math.round(v)), 24, y + 4);
+        // Never draw a scale label where the centre readout box will
+        // cover it: the old code let the nearest label (e.g. 400 under
+        // a 440 readout) sit half under the box and read as clipped.
+        if (y > 32 && y < h - 36 && Math.abs(y - cy) > 30) ctx.fillText(String(Math.round(v)), 24, y + 4);
       }
     }
     ctx.restore();
@@ -431,6 +434,8 @@ export class Hud {
     ctx.stroke();
     ctx.font = '600 10px system-ui, sans-serif';
     ctx.textAlign = 'left';
+    // Rungs only, no degree numbers: the 10/20 labels sat on the
+    // aircraft body and the gate ring in the chase shots.
     for (const deg of [-20, -10, 10, 20]) {
       const y = -deg * pxPerDeg;
       const len = 34;
@@ -438,7 +443,6 @@ export class Hud {
       ctx.moveTo(-len, y);
       ctx.lineTo(len, y);
       ctx.stroke();
-      ctx.fillText(String(Math.abs(deg)), len + 5, y + 3);
     }
     ctx.restore();
     }
@@ -456,8 +460,12 @@ export class Hud {
 
     // Gate and runway labels, projected from the 3D world.
     const gate = ms.mission.gates[ms.gateIndex];
-    const drawTag = (pos, text, hot) => {
-      const p = projectPoint(pos, view, proj, w, h);
+    // `anchor` is the 3D point the pill hangs from. For a gate it is
+    // the TOP of the ring (centre + 27 m: ring radius 24 + tube), so
+    // the pill floats just above the ring instead of covering its top
+    // arc the way the centre-anchored pill did.
+    const drawTag = (pos, text, hot, anchor) => {
+      const p = projectPoint(anchor || pos, view, proj, w, h);
       if (!p || p[0] < 60 || p[0] > w - 60 || p[1] < 70 || p[1] > h - 120) return;
       ctx.font = '700 13px system-ui, sans-serif';
       const tw = ctx.measureText(text).width + 18;
@@ -481,7 +489,8 @@ export class Hud {
         flight.pos[0] - gate.x, flight.pos[1] - gate.y, flight.pos[2] - gate.z);
       const dist = d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
       drawTag([gate.x, gate.y, gate.z],
-        `GATE ${ms.gateIndex + 1}/${ms.mission.gates.length} · ${dist}`, true);
+        `GATE ${ms.gateIndex + 1}/${ms.mission.gates.length} · ${dist}`, true,
+        [gate.x, gate.y + 27, gate.z]);
       // Next gate, smaller and cooler, so the chain reads at a glance.
       // Skip it when it would land on top of the active gate's label.
       const next = ms.mission.gates[ms.gateIndex + 1];
@@ -492,7 +501,8 @@ export class Hud {
           const d2 = Math.hypot(
             flight.pos[0] - next.x, flight.pos[1] - next.y, flight.pos[2] - next.z);
           drawTag([next.x, next.y, next.z],
-            `GATE ${ms.gateIndex + 2} · ${Math.round(d2)} m`, false);
+            `GATE ${ms.gateIndex + 2} · ${Math.round(d2)} m`, false,
+            [next.x, next.y + 27, next.z]);
         }
       }
     } else {

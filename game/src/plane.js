@@ -8,7 +8,7 @@
 import { MeshBuilder, DynamicMesh } from './renderer.js';
 import {
   mat4Identity, mat4Multiply, mat4RotateX, mat4RotateY, mat4RotateZ,
-  mat4Translate, mat4FromAxes, vadd, vscale,
+  mat4Translate, mat4FromAxes, vadd, vscale, clamp, angleWrapDeg,
 } from './math3.js';
 
 const WHITE = [0.94, 0.93, 0.90];
@@ -17,6 +17,52 @@ const RED = [0.85, 0.16, 0.12];
 const DARK = [0.16, 0.17, 0.20];
 const GLASS = [0.10, 0.28, 0.45];
 const GREY = [0.55, 0.57, 0.60];
+
+// Dial geometry, shared by the static panel and the live needles.
+export const DIAL_X = [-0.75, -0.45, -0.15, 0.15, 0.45, 0.75];
+export const DIAL_Y = 0.56;
+// Needle angle for a needle fraction f on the standard 270° gauge
+// sweep (min at 7:30, mid at 12, max at 4:30), matching the HUD
+// six-pack. `f` is the needle fraction; rotating the needle box about
+// Z by a = 0.75π − 1.5πf points its long axis along the dial.
+const dialA = (f) => 0.75 * Math.PI - 1.5 * Math.PI * f;
+const dialDir = (f) => {
+  const a = dialA(f);
+  return [-Math.sin(a), Math.cos(a)];
+};
+
+const KT = 1.94384;      // m/s -> knots
+const FT = 3.28084;      // m -> feet
+const FPM = 196.85;      // m/s -> feet per minute
+
+// Needle fractions for the five needle dials, from the live flight
+// state — the SAME formulas as the HUD six-pack (hud.js), so the 3D
+// dials can never contradict the 2D ones. Index 1 (ATT) has no needle.
+// HDG is a compass on a 270° sweep, so the needle angle is the heading
+// wrapped to ±135° from 12 o'clock; the blind sector (S–SW) pins at
+// the sweep ends, the way a real 270° heading gauge does.
+export function cockpitNeedleFracs(flight) {
+  return [
+    clamp((flight.speed * KT) / 120, 0, 1),
+    null,
+    clamp(((flight.pos[1] * FT) % 1000) / 1000, 0, 1),
+    clamp(0.5 + clamp(angleWrapDeg(flight.heading), -135, 135) / 270, 0, 1),
+    clamp((flight.verticalSpeed * FPM) / 2000 / 2 + 0.5, 0, 1),
+    clamp(flight.throttle, 0, 1),
+  ];
+}
+
+// Model matrix for one live dial needle (needle mesh is a small box
+// centred on its own hub): plane model * dial position * needle spin.
+export function dialNeedleMatrix(state, index, frac) {
+  const a = dialA(frac);
+  const [dx, dy] = dialDir(frac);
+  const local = mat4Multiply(
+    mat4Translate(DIAL_X[index] + dx * 0.03, DIAL_Y + dy * 0.03, -0.848),
+    mat4RotateZ(a),
+  );
+  return mat4Multiply(planeModelMatrix(state), local);
+}
 
 export function buildPlaneMeshes(gl) {
   const b = new MeshBuilder();
@@ -69,8 +115,9 @@ export function buildPlaneMeshes(gl) {
   gear.addCylinder([0, -1.57, -2.6], 0.1, 0.1, 1.45, 5, DARK);
   gear.addCylinder([0, -2.28, -2.6], 0.42, 0.42, 0.3, 8, [0.08, 0.08, 0.09],
     mat4RotateZ(Math.PI / 2));
-  // Belly antenna and pitot.
-  b.addCylinder([0, -1.05, 1.5], 0.06, 0.1, 0.7, 5, DARK);
+  // Pitot tube on the nose side. (The belly antenna was removed in r4:
+  // with the gear up it poked below the belly as a black nub that read
+  // as a wheel tip in the chase view.)
   b.addCylinder([0.9, 0.1, -4.0], 0.05, 0.05, 0.9, 5, DARK,
     mat4RotateX(Math.PI / 2));
 
@@ -94,67 +141,74 @@ export function buildPlaneMeshes(gl) {
   // panel (eye z = +0.9 in model space), so the panel is a low brow
   // across the bottom of the windscreen instead of a wall in the face:
   // panel top y = 0.70 reads at ~58% of the frame, dials below it.
-  // Six lit dials (cream faces, orange needles, tick marks) sit on the
-  // panel face; a dark glareshield strip covers the nose's rear face
-  // above the panel; A-pillars run UP-FORWARD along the windscreen
-  // edges to a roof beam, framing the canopy; a shaped yoke stands in
-  // front of the panel; a cabin floor hides the wing where it passes
-  // under the fuselage, so no wing shows through the cabin floor.
+  // Six lit dials (cream faces, tick marks) sit on the panel face; a
+  // dark glareshield strip covers the nose's rear face above the panel;
+  // A-pillars run UP-FORWARD along the windscreen edges to a roof beam,
+  // framing the canopy; a shaped yoke stands in front of the panel; a
+  // cabin floor hides the wing where it passes under the fuselage, so
+  // no wing shows through the cabin floor.
   // It lives inside the fuselage, so it is only drawn in cockpit view.
   const cockpit = new MeshBuilder();
   const DASH = [0.13, 0.14, 0.16];
   const DASH2 = [0.19, 0.20, 0.22];
-  const YOKE = [0.55, 0.56, 0.58];
-  const FLOOR = [0.30, 0.30, 0.32];
+  // Dark yoke and dark floor: the old light-grey crossbar read as a
+  // flat drawer slab from the seat, and the mid-grey floor band under
+  // the panel read as a second drawer. Dark, the cabin reads as shadow.
+  const YOKE = [0.25, 0.26, 0.28];
+  const FLOOR = [0.14, 0.14, 0.16];
   // Low panel at the cabin front, face toward the pilot.
   cockpit.addBox([0, 0.50, -1.05], [1.9, 0.40, 0.35], mI, DASH);
   // Glareshield brow over the panel top, and a dark strip above it
   // covering the nose's rear face up to the cowl line.
   cockpit.addBox([0, 0.71, -1.0], [1.9, 0.05, 0.35], mI, DASH2);
   cockpit.addBox([0, 0.78, -1.18], [1.72, 0.18, 0.04], mI, DASH);
-  // Six dials: dark rim, lit face, needle and tick marks. The needle
-  // angle follows the standard gauge sweep — 270° with the gap at the
-  // bottom (min at 7:30, mid at 12, max at 4:30) — matching the HUD
-  // six-pack. `f` is the needle fraction; rotating the needle box
-  // about Z by a = 0.75π − 1.5πf points its long axis along the dial.
-  const DIAL_X = [-0.75, -0.45, -0.15, 0.15, 0.45, 0.75];
-  const DIAL_F = [0.62, null, 0.30, 0.50, 0.50, 0.66]; // ATT has no needle
-  const dialA = (f) => 0.75 * Math.PI - 1.5 * Math.PI * f;
-  const dialDir = (f) => {
-    const a = dialA(f);
-    return [-Math.sin(a), Math.cos(a)];
-  };
+  // Six dials: dark rim, lit face, tick marks. The needles are NOT in
+  // this static mesh — they are drawn per frame from the live flight
+  // state (cockpitNeedleFracs / dialNeedleMatrix), so the 3D dials
+  // agree with the 2D six-pack instead of contradicting it.
+  // The dials sit HIGH on the panel (centre y = 0.56, r4): at the old
+  // y = 0.50 their bottoms were sliced flat by the cabin floor's front
+  // edge, which projects just above the dial bottoms from the seat.
+  // Raised, the whole face clears the floor edge; the panel top (0.70)
+  // still clears the dial tops (0.675).
   DIAL_X.forEach((gx, i) => {
-    const f = DIAL_F[i];
     // Rim and face: cylinders tipped to face the pilot (+Z).
-    cockpit.addCylinder([gx, 0.50, -0.868], 0.115, 0.115, 0.018, 12,
+    cockpit.addCylinder([gx, DIAL_Y, -0.868], 0.115, 0.115, 0.018, 12,
       [0.07, 0.08, 0.10], mat4RotateX(Math.PI / 2));
     const faceCol = i === 1 ? [0.30, 0.50, 0.85] // ATT: blue sky half
       : [0.93, 0.91, 0.80];                       // lit cream faces
-    cockpit.addCylinder([gx, 0.50, -0.864], 0.098, 0.098, 0.02, 12,
+    cockpit.addCylinder([gx, DIAL_Y, -0.864], 0.098, 0.098, 0.02, 12,
       faceCol, mat4RotateX(Math.PI / 2));
     // Tick marks at min / mid / max.
     for (const tf of [0, 0.5, 1]) {
       const [dx, dy] = dialDir(tf);
-      cockpit.addBox([gx + dx * 0.088, 0.50 + dy * 0.088, -0.854],
+      cockpit.addBox([gx + dx * 0.088, DIAL_Y + dy * 0.088, -0.854],
         [0.014, 0.028, 0.01], mat4RotateZ(dialA(tf)), [0.12, 0.13, 0.15]);
     }
-    if (f == null) {
-      // Attitude indicator: white horizon bar across the blue face.
-      cockpit.addBox([gx, 0.50, -0.852], [0.14, 0.02, 0.012], mI, [0.95, 0.95, 0.92]);
+    if (i === 1) {
+      // Attitude indicator: a brown ground half under the blue sky
+      // half, with a white horizon bar — the same picture as the HUD
+      // ATT dial, not a plain blue disc. (Static: level flight at the
+      // staged freeze, so a level horizon is the true reading there.)
+      for (let k = 0; k < 8; k++) {
+        const t0 = Math.PI + (k / 8) * Math.PI;
+        const t1 = Math.PI + ((k + 1) / 8) * Math.PI;
+        cockpit.addTriangle(
+          [gx, DIAL_Y, -0.852],
+          [gx + Math.cos(t0) * 0.096, DIAL_Y + Math.sin(t0) * 0.096, -0.852],
+          [gx + Math.cos(t1) * 0.096, DIAL_Y + Math.sin(t1) * 0.096, -0.852],
+          [0.62, 0.42, 0.24]);
+      }
+      cockpit.addBox([gx, DIAL_Y, -0.850], [0.16, 0.018, 0.012], mI,
+        [0.95, 0.95, 0.92]);
     } else {
-      const [dx, dy] = dialDir(f);
-      cockpit.addBox([gx + dx * 0.03, 0.50 + dy * 0.03, -0.852],
-        [0.02, 0.085, 0.012], mat4RotateZ(dialA(f)), [1.0, 0.45, 0.12]);
+      // Hub dot; the live needle is drawn over it each frame.
+      cockpit.addBox([gx, DIAL_Y, -0.851], [0.03, 0.03, 0.012], mI,
+        [0.10, 0.11, 0.13]);
     }
-    cockpit.addBox([gx, 0.50, -0.851], [0.03, 0.03, 0.012], mI, [0.10, 0.11, 0.13]);
   });
-  // Warm lamps on the glareshield brow.
-  for (const lx of [-0.45, 0.45]) {
-    cockpit.addBox([lx, 0.745, -0.95], [0.07, 0.03, 0.07], mI, [1.0, 0.8, 0.3]);
-  }
   // A-pillars: from the panel's top corners steeply UP-FORWARD to the
-  // roof beam — a canopy frame, not a fence rail. Thin (0.08), outboard
+  // roof beam — a canopy frame, not a fence rail. Thin (0.07), outboard
   // of the nose (x = ±0.95) so the whole pillar shows instead of
   // vanishing inside the nose box. The old pillars lay almost flat
   // (rotated -1.28 rad) and the beam sat at y = 1.0, only 5 cm above
@@ -163,28 +217,31 @@ export function buildPlaneMeshes(gl) {
   // near the top of the windscreen, well clear of the horizon and the
   // gate: beam y = 1.9, pillars tilted -0.68 rad from vertical.
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.95, 1.31, -1.53], [0.08, 1.52, 0.08], mat4RotateX(-0.68), DASH);
+    cockpit.addBox([s * 0.95, 1.31, -1.53], [0.07, 1.52, 0.07], mat4RotateX(-0.68), DASH);
   }
   // Roof beam across the top of the windscreen, thin so it reads as
   // the roof edge, not a bar across the sky.
-  cockpit.addBox([0, 1.9, -2.0], [1.95, 0.05, 0.05], mI, DASH);
-  // Yoke: low and compact, tucked BELOW the dial row. The old yoke's
-  // crossbar sat at y = 0.66, z = -0.18 — from the pilot's eye that
-  // projects onto the dial faces (dial centres read at ~14° below
-  // horizontal; the old bar at ~15°), hiding dials 3–4 almost fully
-  // and dials 2 & 5 halfway. The new bar tops out at y = 0.57, which
-  // projects ~19.5° below horizontal, just under the dial bottoms
-  // (~17.7°), so all six dials read whole; the column rises from the
-  // floor between the side consoles, in the gap between dials 3 and 4.
-  cockpit.addBox([0, 0.34, -0.15], [0.08, 0.40, 0.08], mI, YOKE);
-  cockpit.addBox([0, 0.54, -0.18], [0.38, 0.06, 0.08], mI, YOKE);
+  cockpit.addBox([0, 1.9, -2.0], [1.95, 0.04, 0.05], mI, DASH);
+  // Cabin roof: a thin dark panel over the pilot, joining the beam to
+  // the airframe behind the seat. Without it the canopy was three black
+  // bars floating in open sky; with it the top of the frame reads as a
+  // cockpit roof, and the gate stays clear below it.
+  cockpit.addBox([0, 1.93, -1.35], [1.9, 0.05, 1.3], mI, DASH);
+  // Yoke: a dark ram's-horn — slim column from the floor, a narrow
+  // crossbar and two short grip nubs at its ends. It sits low, below
+  // the dial bottoms, and reads as a control, not a drawer: the old
+  // wide light-grey bar (0.38 m, sun-lit top face) was the "drawer".
+  // The crossbar tops out at y = 0.615, which projects below the dial
+  // bottoms and above the bottom HUD bar.
+  cockpit.addBox([0, 0.485, -0.12], [0.07, 0.24, 0.07], mat4RotateX(0.18), YOKE);
+  cockpit.addBox([0, 0.59, -0.10], [0.28, 0.05, 0.06], mI, YOKE);
   for (const s of [-1, 1]) {
-    cockpit.addBox([s * 0.16, 0.53, -0.18], [0.07, 0.06, 0.07], mI, YOKE);
+    cockpit.addBox([s * 0.125, 0.615, -0.10], [0.05, 0.05, 0.06],
+      mat4RotateZ(-s * 0.20), YOKE);
   }
   // Cabin floor and kick panels: they sit just above the wing (top
-  // y = 0.32), so from the seat the wing never shows through the floor.
-  // Light enough to read as a floor, not a black hole.
-  cockpit.addBox([0, 0.38, 0.3], [1.9, 0.06, 2.6], mI, FLOOR);
+  // y = 0.38), so from the seat the wing never shows through the floor.
+  cockpit.addBox([0, 0.35, 0.3], [1.9, 0.06, 2.6], mI, FLOOR);
   for (const s of [-1, 1]) {
     cockpit.addBox([s * 0.92, 0.50, 0.3], [0.06, 0.24, 2.6], mI, FLOOR);
   }
@@ -195,6 +252,17 @@ export function buildPlaneMeshes(gl) {
   }
   cockpit.addBox([-0.82, 0.72, 0.1], [0.05, 0.12, 0.05], mI, DASH);
   cockpit.addBox([-0.82, 0.79, 0.1], [0.09, 0.05, 0.05], mI, [0.85, 0.2, 0.15]);
+
+  // Windscreen glass: a separate mesh, drawn faint (alpha 0.15) in
+  // cockpit view only — an opaque pane would hide the sky and the gate.
+  const glass = new MeshBuilder();
+  glass.addBox([0, 1.31, -1.53], [1.82, 1.52, 0.02], mat4RotateX(-0.68),
+    [0.65, 0.80, 0.90]);
+
+  // One dial needle, centred on its own hub: drawn once per dial per
+  // frame with a model matrix from dialNeedleMatrix().
+  const needle = new MeshBuilder();
+  needle.addBox([0, 0, 0], [0.02, 0.085, 0.012], mI, [1.0, 0.45, 0.12]);
 
   // Navigation lights: red on the left tip, green on the right.
   const nav = new MeshBuilder();
@@ -208,6 +276,8 @@ export function buildPlaneMeshes(gl) {
     prop: prop.build(gl),
     disc: disc.build(gl),
     cockpit: cockpit.build(gl),
+    glass: glass.build(gl),
+    needle: needle.build(gl),
     nav: nav.build(gl),
     trails: new DynamicMesh(gl, 512),
   };

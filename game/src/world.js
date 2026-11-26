@@ -314,25 +314,12 @@ export function buildWorld(gl) {
     out.gateInner = inner.build(gl);
   }
 
-  // ---- Glide-path chevrons: flat arrows floating toward the threshold --
-  {
-    const b = new MeshBuilder();
-    const rwy = RUNWAYS.main;
-    for (let i = 0; i < 5; i++) {
-      const d = 180 + i * 150; // metres out from the threshold
-      const x = rwy.cx - rwy.length / 2 - d;
-      const y = rwy.elev + 6 + d * Math.tan((3 * Math.PI) / 180);
-      const z = rwy.cz;
-      const s = 9;
-      // Wound to face up, like the sea: the old order faced down and
-      // backface culling hid the chevrons from the approaching aircraft.
-      b.addTriangle([x - s, y, z - s], [x - s, y, z + s], [x + s, y, z],
-        [0.35, 0.95, 0.95]);
-      b.addTriangle([x - s, y, z - s * 0.55], [x - s, y, z + s * 0.55], [x + s * 0.4, y, z],
-        [0.65, 1.0, 1.0]);
-    }
-    out.chevrons = b.build(gl);
-  }
+  // ---- Glide-path chevrons: REMOVED (r4) --------------------------------
+  // The five floating cyan arrows west of the threshold read as holes
+  // in the mesh / z-fighting sea showing through the grass, not as
+  // approach markers: from the chase camera they sat ON the meadow
+  // slope as bright cyan-white triangles. The beacon column + ring
+  // already mark the threshold, so the chevrons are gone, not moved.
 
   // ---- Beacon: tall cyan column over the main threshold ----------------
   {
@@ -367,14 +354,22 @@ export function buildWorld(gl) {
   // ---- Clouds: flattened puffs ----------------------------------------
   {
     const b = new MeshBuilder();
+    // Seed 777 (r4): the smallest puffs of the three seeds tried — 778
+    // put a dark puff behind the compass in the lighthouse shot, 779
+    // put one behind the compass in the cover shot itself. With 777
+    // only a small soft puff kisses the minimap's top-right corner in
+    // the cover shot, and every other panel is clear.
     const crng = makeRng(777);
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 24; i++) {
       const x = -3000 + crng() * 6000;
       const z = -3000 + crng() * 6000;
       // Keep the flight corridor over the home island clear of puffs.
       if (Math.hypot(x, z) < 700) continue;
-      const y = 320 + crng() * 180;
-      const s = 40 + crng() * 70;
+      // Smaller and higher than before (r4): the old 40–110 m puffs
+      // at 320–500 m crowded the top-right sky and one big slab
+      // butted into the minimap's left edge in the cover shot.
+      const y = 400 + crng() * 160;
+      const s = 30 + crng() * 45;
       // Near-white puffs: the old warm tan read as dark rock slabs
       // from below, where the sun never reaches the underside.
       const bright = 0.96 + crng() * 0.04;

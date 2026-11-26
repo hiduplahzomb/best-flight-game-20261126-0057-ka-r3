@@ -4,7 +4,7 @@
 
 import { Renderer, DynamicMesh } from './renderer.js';
 import { buildWorld, buildSkyMesh, groundHeight, RUNWAYS } from './world.js';
-import { buildPlaneMeshes, planeModelMatrix, propModelMatrix, discModelMatrix, wingtipPositions, updateTrails } from './plane.js';
+import { buildPlaneMeshes, planeModelMatrix, propModelMatrix, discModelMatrix, wingtipPositions, updateTrails, cockpitNeedleFracs, dialNeedleMatrix } from './plane.js';
 import { createFlightState, updateFlight, landingGrade, runwayUnder } from './flight.js';
 import { MISSIONS, createMissionState, updateMission, nextGate, missionRunway } from './missions.js';
 import { Hud } from './hud.js';
@@ -24,11 +24,19 @@ import {
 // in until the tower fills the frame behind its gate; the final is a
 // chase-camera shot on the centreline of the approach — the hero
 // aircraft big in the lower frame, the whole runway ahead with its
-// beacon, chevrons and PAPI — the same framing as the cover.
+// beacon and PAPI — the same framing as the cover.
 const SHOTS = {
   cover: {
     mission: 1, camera: 'chase',
     stage: { x: 1500, alt: 135, z: 200, heading: 66, speed: 52, throttle: 0.62, gateIndex: 4 },
+    // Hero framing (r4): the aircraft banks 18° into its turn and the
+    // chase camera sits a quarter off the tail (right and a little
+    // high), so the shot is a 3/4 view from above — not the flat
+    // dead-astern 0° pose. The bank is HELD through the settle (see
+    // the roll override below): the autopilot's own roll fades to zero
+    // as it lines up on the gate, so a banking cover needs it forced.
+    // The fin ends up left of the gate ring and clear of the crosshair.
+    bank: 18, camSide: 0.22, camUp: 5.0,
     settle: 30,
   },
   cockpit: {
@@ -193,9 +201,15 @@ function startGame() {
     }
     camDist = clamp(camDist + input.zoom * 6, 16, 34);
     input.zoom = 0;
+    // Staged hero framing: the cover shot offsets the chase camera a
+    // quarter off the tail (right and a little high) for a 3/4 view;
+    // every other shot keeps the plain dead-astern camera.
+    const camSide = shotSpec ? (shotSpec.camSide || 0) : 0;
+    const camUpOff = shotSpec ? (shotSpec.camUp || 3.6) : 3.6;
     const desired = vadd(
-      vadd(flight.pos, vscale(forward, -camDist)),
-      vscale(up, 3.6),
+      vadd(vadd(flight.pos, vscale(forward, -camDist)),
+        vscale(right, camDist * camSide)),
+      vscale(up, camUpOff),
     );
     // Keep the camera out of the hills.
     const minY = groundHeight(desired[0], desired[2]) + 2.5;
@@ -276,6 +290,13 @@ function startGame() {
       simTime += pdt;
       if (autopilot) {
         flyAutopilot(pdt);
+        if (shotSpec && shotSpec.bank != null) {
+          // Staged bank for the hero frame: the autopilot's own roll
+          // fades to zero as it lines up on the gate, so a banking
+          // cover needs the bank held through the settle. Staging
+          // only — live flight is untouched.
+          flight.roll = shotSpec.bank;
+        }
         updateFlight(flight, { autopilot: true }, pdt);
         if (shotSpec) {
           settleLeft--;
@@ -342,11 +363,10 @@ function startGame() {
     const cloudDrift = (simTime * 2.2) % 600;
     renderer.drawSolid(world.clouds,
       mat4Translate(cloudDrift - 300, 0, 0), 0.5, 0.9);
-    // Runway beacon and glide chevrons.
+    // Runway beacon.
     const pulse = 0.5 + 0.5 * Math.sin(simTime * 2.4);
     renderer.drawSolid(world.beacon, mat4Identity(), 0.6, 0.30 + 0.10 * pulse);
     renderer.drawSolid(world.beaconRing, mat4Identity(), 0.6, 0.35 + 0.3 * pulse);
-    renderer.drawSolid(world.chevrons, mat4Identity(), 0.55, 0.9);
     // Lighthouse beam, sweeping.
     const beamModel = mat4Multiply(
       mat4Translate(2300, groundHeight(2300, -1250) + 34, -1250),
@@ -399,6 +419,13 @@ function startGame() {
       // sky at the frame edges. The pilot sees the airframe, not them.
       renderer.drawSolid(plane.body, model);
       renderer.drawSolid(plane.cockpit, model);
+      // Live dial needles, from the same numbers as the HUD six-pack,
+      // and the faint windscreen glass over the canopy frame.
+      const fracs = cockpitNeedleFracs(flight);
+      fracs.forEach((f, i) => {
+        if (f != null) renderer.drawSolid(plane.needle, dialNeedleMatrix(flight, i, f));
+      });
+      renderer.drawSolid(plane.glass, model, 0, 0.15);
     }
     if (flight.speed > 24) {
       renderer.drawSolid(windMesh, mat4Identity(), 0, 0.2);
